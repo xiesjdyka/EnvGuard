@@ -28,9 +28,9 @@ if ($Package) {
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     # Explicit allow-list: never package machine profiles, test data, logs or credentials.
     Copy-Item -LiteralPath $programPath -Destination $releaseDir
-    Copy-Item -LiteralPath (Join-Path $projectDir 'README.md'),(Join-Path $projectDir 'LICENSE'),(Join-Path $projectDir 'CHROME-PRIVACY.md'),(Join-Path $projectDir 'ChromePrivacy.ps1') -Destination $releaseDir
+    Copy-Item -LiteralPath (Join-Path $projectDir 'README.md'),(Join-Path $projectDir 'LICENSE'),(Join-Path $projectDir 'CHROME-PRIVACY.md'),(Join-Path $projectDir 'ChromePrivacy.ps1'),(Join-Path $projectDir 'TECHNICAL.md'),(Join-Path $projectDir 'CHROME-DETAILS.md') -Destination $releaseDir
     $archive = Join-Path $outputDir 'EnvGuard-windows-x64.zip'
-    Compress-Archive -LiteralPath (Join-Path $releaseDir 'EnvGuard.exe'),(Join-Path $releaseDir 'README.md'),(Join-Path $releaseDir 'LICENSE'),(Join-Path $releaseDir 'CHROME-PRIVACY.md'),(Join-Path $releaseDir 'ChromePrivacy.ps1') -DestinationPath $archive -Force
+    Compress-Archive -LiteralPath (Join-Path $releaseDir 'EnvGuard.exe'),(Join-Path $releaseDir 'README.md'),(Join-Path $releaseDir 'LICENSE'),(Join-Path $releaseDir 'CHROME-PRIVACY.md'),(Join-Path $releaseDir 'ChromePrivacy.ps1'),(Join-Path $releaseDir 'TECHNICAL.md'),(Join-Path $releaseDir 'CHROME-DETAILS.md') -DestinationPath $archive -Force
     $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $outputDir 'SHA256SUMS.txt'), "$digest  EnvGuard-windows-x64.zip`n", [Text.UTF8Encoding]::new($false))
     Write-Output "便携包：$archive"

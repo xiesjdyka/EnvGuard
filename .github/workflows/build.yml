@@ -55,6 +55,6 @@ jobs:
           if ($version -ne ($env:RELEASE_TAG.Substring(1) + '.0')) { throw 'Tag and binary version differ' }
           gh release view $env:RELEASE_TAG --repo $env:GH_REPO 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published assets' }
-          $notes = "Windows x64 便携工具：新设备首次确认环境基准，选择保护软件和日志文件；环境异常预警，手动紧急关闭配置范围内进程和专属服务。包内包含中文 README、Chrome 登录/浏览器调用前的防护指南和可选策略脚本。先准备并核对 Chrome 和代理环境，再保存基准。下载 ZIP 后核对 SHA256SUMS.txt。不是网络隔离器，不保证全流量防泄漏或账号安全。详见仓库 README。"
+          $notes = "下载 EnvGuard-windows-x64.zip，解压后双击 EnvGuard.exe。第一次先连好代理，选要保护的软件和日志位置，核对当前设置再保存。以后环境变了会提醒你，需要停用就点红色紧急关闭按钮，不会自动断网或关软件。包内首页和 Chrome 参考方法已改成白话，附可选脚本的用法、检查和恢复步骤；技术细节另放一页。不新增浏览器按钮、不自动修改 Chrome。下载文件可用 SHA256SUMS.txt 核对；不能保证全流量防泄露或账号安全。"
           gh release create $env:RELEASE_TAG ./out/EnvGuard-windows-x64.zip ./out/SHA256SUMS.txt --repo $env:GH_REPO --title "EnvGuard $env:RELEASE_TAG" --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

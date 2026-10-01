@@ -1,94 +1,107 @@
-# 先配置专用 Chrome，再使用 Claude
+# 当时 Chrome 是怎么弄的？可以参考这条思路
 
-本指南适用于 Claude 桌面版打开浏览器登录，以及你授权软件使用 Chrome 浏览网页的场景。**减少意外直连和多余数据暴露，不等于匿名、不等于所有流量隔离，也不保证账号不会被限制。**不要把这里的配置用于冒充所在地或绕过服务的资格要求。
+使用 Claude 桌面版时，登录可能跳到浏览器；工作中也可能用浏览器打开网页。所以除了软件本身，也要看看浏览器有没有多余的连接或不必要的权限。
 
-顺序：**准备可靠网络 → 配置专用 Chrome → 验证策略和出口 → 保存 EnvGuard 基准 → 再登录或使用 Claude。**没有验证好就先不登录。
+**这是一份独立的参考方法，不是要给 EnvGuard 再加浏览器功能。** 可以按自己的需要选用。目标是减少意外暴露，不是让网站完全不知道你是谁，也不保证账号不被限制。
 
-## 1. 准备专用浏览器配置
+## 当时先做了什么？
 
-- 用正版 Chrome 并保持更新、安全浏览和证书校验开启。不要关闭沙箱、忽略 HTTPS 错误或安装来历不明的证书。
-- 点击右上角头像，新建专用配置，例如“工作专用”，不导入个人浏览历史、密码和不需要的扩展。不必为了使用 Claude 而登录 Chrome 浏览器同步。多个配置能分开历史、密码、书签，但**不是网络隔离**。[Chrome 官方多配置说明](https://support.google.com/chrome/answer/2364824)
-- 确认 Windows 默认浏览器和 Claude 实际弹出的登录浏览器是你准备的 Chrome。**默认浏览器是 Chrome，并不证明它一定打开专用配置**。先打开专用窗口；登录回调出现时再次检查头像和配置。必要时通过 Chrome“关于/版本”页的 `Profile Path` 确认，不要在错误配置里输入账号。
-- 定位所用配置的 `Preferences` 文件，首次配置 EnvGuard 时选择它。不要一直选择 `Default` 而实际使用 `Profile 1`。
-- 语言、日期和时区按你的真实工作需求设置。保留自动计时和正常夏令时，不锁死时间，不依赖改语言、字体或 Emoji 来“证明账号安全”。
+先把 Chrome 设为默认浏览器，然后处理两项网络设置：
 
-## 2. 可选：应用浏览器网络/隐私策略
+- **限制 WebRTC 不经过代理的 UDP 连接。** WebRTC 常用于语音、视频等实时通信，它不一定和普通网页走完全一样的连接方式。
+- **关闭提前加载和连接预测。** 不让 Chrome 为了“打开更快”，提前解析或连接你还没打开的内容。
 
-包内的 `ChromePrivacy.ps1` **默认仅检查，绝不自动修改**。只有你执行 `Apply` 并明确确认作用范围，才应用六项策略。
+当时在 `chrome://policy` 里看到这两项状态是“正常”，才确认 Chrome 已识别设置：
 
-**重要：当前用户注册表策略会影响该 Windows 用户的所有 Chrome 配置，不只专用窗口。**不适合与需要直连、同步、视频通话的日常 Chrome 混用。浏览器设置和手机/其他用户不在此脚本覆盖范围。
+| 名字，不用背，核对时找它 | 当时的值 |
+| --- | --- |
+| `WebRtcIPHandling` | `disable_non_proxied_udp` |
+| `NetworkPredictionOptions` | `2` |
 
-在解压后的文件夹打开 PowerShell 7。先检查：
+这两项的作用可以查 [Chrome 的 WebRTC 定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/WebRtc/WebRtcIPHandling.yaml) 和 [提前加载定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/NetworkPredictionOptions.yaml)。
+
+后面还核对了语言、时区等设置。但这些只是浏览器显示和工作环境的设置，**改成英文、换字体，不会让网络自动更安全**。尤其“默认字体改成 Arial”和“网站检测不到中文字体”是两回事。不要为了把第三方检测分数刷到零，反复装各种改指纹扩展。
+
+## 想参考的话，先照这个顺序来
+
+1. **先连好代理，再检查出口。** 在准备使用的 Chrome 窗口查一下公网 IP，确认是你想用的出口。代理连上不代表出口一定正确。
+2. **尽量用一个工作专用的 Chrome 配置。** 点右上角头像新建配置，少装扩展，不导入不需要的密码和历史。它能分开这些浏览数据，但不等于网络隔离。设了默认浏览器后，也要看登录页实际打开的是不是这个配置。
+3. **设置后，要去浏览器里确认。** 写入设置成功，不等于 Chrome 已经用上了。下面会说怎么看。
+4. **最后再保存 EnvGuard 的设置。** 不要先把错误出口或没生效的设置记成正常。每次登录前先开 EnvGuard 看当前结果。
+
+## 有代码吗？有，作为可选方案附在这里
+
+包里的 [ChromePrivacy.ps1](ChromePrivacy.ps1) 可以直接修改相关设置，也支持恢复。**它比当时最初的两项设置多：还会固定 Chrome 代理、关闭 QUIC、关窗后台模式和浏览器同步。不是当时两项代码的原样复刻。** 完整规则见 [详细说明](CHROME-DETAILS.md)。
+
+执行前先看清影响：
+
+- 它会影响**当前 Windows 用户的全部 Chrome 配置**，不只是工作窗口。如果日常 Chrome 还要直连或同步，不要直接照搬。
+- Chrome 会固定使用你填的本机代理；代理不可用时，普通网页请求可能打不开。
+- 语音、视频等功能可能受影响；Chrome 的 Google 浏览器同步会被关闭。关闭同步不是禁止登录网站。
+- 它不修改系统代理，不替你调整 v2rayN 路由，也不自动关浏览器。
+
+### 怎么执行？
+
+先从 [发布页](https://github.com/xiesjdyka/EnvGuard/releases/latest) 下载 ZIP 并解压。只看 GitHub 网页是不够的，脚本要在电脑上运行。
+
+打开解压后的文件夹，在文件夹空白处右键，选择“在终端中打开”。使用 PowerShell 7；下面的命令一次复制一行，粘贴后按回车。
+
+**先看看现有设置，不会修改：**
 
 ```powershell
 pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Inspect
 ```
 
-先确保本机代理已正常运行，确认 HTTP/mixed 端口，再应用。例如本机端口 `10808`：
+**确认了解上面的影响后，再应用：** 假设 v2rayN 底部显示的本机 `mixed` 端口是 `10808`：
 
 ```powershell
 pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -ProxyPort 10808 -ConfirmAllChromeProfiles
 ```
 
-端口要填本机软件的 HTTP/mixed 监听端口，**不是卖家给的远程节点端口**。若权限被拒绝，使用同一 Windows 账号以管理员方式打开 PowerShell 7，重新检查；不要修改注册表权限或改用另一账号猜测操作。
+如果你显示的是别的本机端口，就只把 `10808` 换成自己的。**不是卖家给你的远程节点端口。**
 
-| 策略 | 设置与用途 |
-| --- | --- |
-| `ProxySettings` | 固定到 `http://127.0.0.1:你的端口`，不添加 `DIRECT` 回退；只明确放行本机登录回调地址，不放行公网域名 |
-| `WebRtcIPHandling` | `disable_non_proxied_udp`，限制不经过代理的 WebRTC UDP；可能影响语音、视频或实时通信 |
-| `NetworkPredictionOptions` | `2`，关闭 DNS 预取、连接预测和页面预加载 |
-| `QuicAllowed` | `0`，禁用 Chrome QUIC，需要完整重启浏览器 |
-| `BackgroundModeEnabled` | `0`，关闭“关窗口后继续运行后台应用”的模式；不代表所有 Chrome 进程一定立即退出 |
-| `SyncDisabled` | `1`，禁用 Chrome 的 Google 云端同步；**不是禁止登录网站或禁止 Google OAuth** |
+如果提示找不到 `pwsh`，说明当前终端没有找到 PowerShell 7，请先确认它已安装。如果提示找不到脚本，说明终端没在解压后的文件夹里。若提示“拒绝访问”，用同一个 Windows 账号以管理员身份打开 PowerShell 7，再进入这个文件夹操作。
 
-策略来自 [Chromium 官方 ProxySettings 定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/ProxySettings.yaml)、[WebRTC 定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/WebRtc/WebRtcIPHandling.yaml)、[预加载定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/NetworkPredictionOptions.yaml)、[QUIC 定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/QuicAllowed.yaml)、[后台模式定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/BackgroundModeEnabled.yaml) 和 [同步定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/SyncDisabled.yaml)。
+如果提示组织策略冲突或脚本被安全策略阻止，先停止操作，检查原因；不要删除组织策略、修改注册表权限或关闭安全防护来强行运行。
 
-固定代理适用于 Chrome 代理机制覆盖的 HTTP/HTTPS/WebSocket 请求；单一代理不可用时，这些请求通常报代理连接错误，而不是因为本脚本提供了直连备选。**代理软件自己仍可能按其路由规则直连，因此本机代理端口通了不等于远程出口正确。**脚本不会替你修改 v2rayN 的实际路由，也不对 Claude 自身、扩展的外部程序、系统 DNS、其他软件或未知协议做整机拦截。[Chromium 官方代理行为说明](https://github.com/chromium/chromium/blob/main/net/docs/proxy.md)
+### 怎么看有没有生效？
 
-本机例外保留 `localhost` / `*.localhost`、IPv4 `127.0.0.0/8` 和 IPv6 `[::1]`，便于桌面软件登录回调，不是给登录官网设置直连。不要添加 `<local>`、单独的 `*` 或公网域名绕过项。此包不会把这些本地回调送到远程代理。
+1. 先保存浏览器里正在做的事，完整退出 Chrome，再重新打开。必要时确认后台也已退出；脚本不会帮你杀掉浏览器。
+2. 在 Chrome 地址栏输入 `chrome://policy`，按回车，点“重新加载政策”。
+3. 最初那两项应是上表的值。使用完整脚本后还应有 `ProxySettings`、`QuicAllowed`、`BackgroundModeEnabled` 和 `SyncDisabled`，这六项的状态都应正常。
+4. 展开 `ProxySettings`，确认代理地址是 `http://127.0.0.1:你的本机端口`，模式是 `fixed_servers`。详细核对值见 [六项设置表](CHROME-DETAILS.md#2-可选应用浏览器网络隐私策略)。
+5. 再在这个 Chrome 窗口查公网 IP，和 EnvGuard 检测到的出口对照。
 
-## 3. 重启、验证，再记录基准
+没有出现、出现错误或出口不对，先不要继续登录。单次查 IP 通过，也不代表所有连接都验证过了。
 
-1. 保存正在编辑的内容，完整退出 Chrome 所有窗口和后台进程，再打开专用配置。脚本不会自行杀浏览器。
-2. 打开 `chrome://policy`，重新加载策略。核对上表六项的值、来源和状态是否正常。注册表写入成功≠Chrome 已加载成功；机器/云端管理、过期策略或策略冲突都可能影响实际生效。
-3. `ProxySettings` 展开查看：确认 `fixed_servers`、正确本机端口、没有 `direct://`、没有公网绕过域名。发现冲突先暂停；不要删除公司/组织管理策略强行绕过。
-4. 在专用 Chrome 查公网出口，与 EnvGuard 两个出口检查的结果对照。浏览器出口检查提供单次证据，不是全部流量证明。
-5. 可用一个不涉及真实账号的网页复核 WebRTC 可见地址，避免出现不应暴露的公网地址。第三方检测站可能误判字体或其他指纹，不能据此宣布“完全安全”。不要上传真实登录回调地址或 Cookie 给检测站。
-6. EnvGuard 选择这个 Chrome 的 `Preferences`，再生成快照、核对并保存。策略或浏览器配置后来变化会与基准比较；改好再保存，别先保存错误环境。
+`localhost` / `127.0.0.1` 这些本机地址是有意保留的，桌面软件登录回调可能需要它们，不是把登录官网放行直连。别自行加公网网站绕过项。
 
-**不要为测试而在 Claude 登录中途断开代理。**代理断开试验仅在无登录、无工作、无敏感页面时进行，结束后重新确认实际出口。EnvGuard 只是预警，不会自动关闭浏览器；检测有时限。
+### 不想用了，怎么恢复？
 
-## 4. 每次登录/调用浏览器前
-
-- 先开 EnvGuard，确认当前所选检查项通过；代理出口、时区和浏览器配置均已核对。
-- 确认登录页网址和 HTTPS 证书正常，再输入账号。只有可信官方网站才能接收你的密码、验证码和授权。
-- 定位、摄像头、麦克风、通知和剪贴板读取，按网站实际必要性授权；不需要就拒绝。不要“一键允许所有站点”。
-- 保持浏览器扩展最少。能读取所有网页的扩展可能接触登录页和会话数据；不要为了一个字体风险分装许多指纹修改扩展。已有字体防护扩展不保证隐藏全部系统字体。
-- 不公开截图中的节点链接、UUID、Cookie、浏览器配置文件或登录回调 URL。独享 IP 不代表独享线路稳定，也不代表网络身份不可见。
-- 网站、代理服务和 OAuth 提供方仍能知道该次连接的出口及授权信息，正常登录不可能对目标网站“什么都不透露”。
-
-## 5. 异常时怎么处理，以及 Chrome 全进程范围
-
-遇到环境告警，先停止新的登录和浏览器操作，查看原因。需要停止就点红色紧急按钮。软件控制浏览器时，不要以为关掉 Claude 主窗口就等于关掉 Chrome 或全部外部任务。
-
-若要一起关闭 Chrome：首次配置里**另外添加 `chrome.exe`**，核对它的范围。**相同安装路径的 Chrome 通常共享一套程序身份；紧急关闭可能结束该安装的所有 Chrome 配置窗口和后台进程，无法仅凭 EXE 区分专用配置。**在用其他 Chrome 窗口工作的用户务必理解影响；本工具不会自动把 Chrome 加入关闭列表。
-
-若自动化打开的是其他浏览器、不同 Chrome 安装、独立运行时或远程任务，也要单独确认保护范围。没有配置或不能可靠识别的进程，不会被假装已覆盖。若需要“每个请求都拦截、任何绕过都禁止”，应采用专门的网络隔离/防火墙架构，不能把本指南加预警当成等价方案。
-
-## 6. 恢复原策略
-
-脚本只为自己管理的六项保存恢复记录，不备份浏览历史、密码或整个浏览器。记录放在 `%LOCALAPPDATA%\EnvGuard\chrome-policy-state.json`，**不要公开上传**。重复应用不会丢掉第一次的原值；遇到其他操作改了策略会拒绝覆盖。
+先暂停敏感页面操作，在同一个文件夹执行：
 
 ```powershell
 pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -ConfirmAllChromeProfiles
 ```
 
-恢复你应用前的六项值，不删除其他策略。恢复后重启 Chrome；原代理路径可能是系统代理或直连，所以先暂停敏感网页操作，再重新确认环境。不会改系统网络，其他软件恢复正常网络由你自己控制。
+它恢复的是**本脚本应用前保存的六项设置**，不是把所有 Chrome 设置清空，也不能撤销你以前用别的方法做过的修改。恢复后重开 Chrome，再查实际出口；原设置可能允许直连。
 
-写策略前记录请求，完成后记录结果，默认沿用现有 EnvGuard 的日志文件；首次配置前则写 `%LOCALAPPDATA%\EnvGuard\logs\events.jsonl`。也可通过 `-LogFile 'D:\你的日志目录\events.jsonl'` 指定。日志请求无法保存时不会开始策略写入；硬盘或权限故障仍可能让后续结果记录失败，脚本会报错而不是伪造成功。
+应用和恢复也会留日志：已有 EnvGuard 配置时使用你选的日志文件，否则默认写到 `%LOCALAPPDATA%\EnvGuard\logs\events.jsonl`。不要把本机的恢复记录和日志上传到公开仓库。
 
-脚本自测只操作随机命名的隔离测试注册表项，不修改真实 Chrome：
+## 登录或让软件使用浏览器时，再注意这几件事
 
-```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode SelfTest
-```
+- 确认确实是官方网站，HTTPS 没有证书错误。不要把密码、验证码或登录回调链接交给第三方检测网站。
+- 定位、摄像头、麦克风、通知等权限，不需要就拒绝，不要一口气全允许。
+- 少装扩展，特别是能读取所有网页的扩展。改指纹扩展不是通用的防泄露办法。
+- Chrome 和系统保持更新，不关闭安全浏览、沙箱或证书校验。
+- 出口或设置异常时，先暂停操作。如果要连浏览器一起紧急关闭，必须把 Chrome 另外加入 EnvGuard 的保护软件；这可能关掉同一安装下的全部 Chrome 窗口。
+
+## 它能防什么，不能防什么？
+
+这条思路主要减少 Chrome 的额外连接和不必要的数据暴露。完整脚本给 Chrome 指定代理，但**代理软件自己仍可能按路由直连**；Claude 自身、其他软件、扩展调用的外部程序也不因此被隔离。[Chrome 官方代理说明](https://github.com/chromium/chromium/blob/main/net/docs/proxy.md)
+
+登录的网站仍会知道你的账号和本次连接的出口。EnvGuard 的提醒也有检测时间，不是掉线瞬间就能拦住每个请求。
+
+所以重点不是“把检测网站变成全绿”，而是：**知道连接怎么走，确认设置真的生效，少给不必要的权限，异常时停止操作。** 遵守所用服务的使用规则，不把这套方法当作冒充所在地或账号安全的保证。
+
+[回到 EnvGuard 首页](README.md) · [查看完整 Chrome 技术说明](CHROME-DETAILS.md)
