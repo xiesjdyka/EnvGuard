@@ -1,0 +1,59 @@
+name: Build, test and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build and test
+        shell: pwsh
+        run: ./Build.ps1 -Test -Package
+      - name: Keep portable package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: EnvGuard-windows-x64
+          path: |
+            out/EnvGuard-windows-x64.zip
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build verified release
+        shell: pwsh
+        run: ./Build.ps1 -Test -Package
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Release tag must be vMAJOR.MINOR.PATCH' }
+          $version = (Get-Item -LiteralPath ./out/EnvGuard.exe).VersionInfo.FileVersion
+          if ($version -ne ($env:RELEASE_TAG.Substring(1) + '.0')) { throw 'Tag and binary version differ' }
+          gh release view $env:RELEASE_TAG --repo $env:GH_REPO 2>$null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published assets' }
+          gh release create $env:RELEASE_TAG ./out/EnvGuard-windows-x64.zip ./out/SHA256SUMS.txt --repo $env:GH_REPO --title "EnvGuard $env:RELEASE_TAG" --notes "Windows x64 portable. Read README before first setup. Warnings + manual emergency close, not network isolation. Verify SHA256SUMS.txt."
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

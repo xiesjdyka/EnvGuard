@@ -1,0 +1,16 @@
+out/
+obj/
+bin/
+*.user
+*.log
+*.jsonl
+profiles/
+local-data/
+*.msix
+*.zip
+*.pfx
+*.snk
+test-output/
+monitor-config.json
+default.json
+*.pending
