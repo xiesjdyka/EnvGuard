@@ -25,7 +25,7 @@ namespace EnvGuard
         public static FlowLayoutPanel Buttons(){return new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=54,Padding=new Padding(0,8,0,0),WrapContents=false};}
         public static void Error(string message){MessageBox.Show(message,"EnvGuard",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
         public static void Browse(TextBox target,string title,string filter){using(var d=new OpenFileDialog{Title=title,Filter=filter})if(d.ShowDialog()==DialogResult.OK)target.Text=d.FileName;}
-        public static void Field(TableLayoutPanel grid,int row,string label,Control control,Button browse){grid.Controls.Add(new Label{Text=label,AutoSize=true,Anchor=AnchorStyles.Left},0,row);grid.Controls.Add(control,1,row);if(browse!=null)grid.Controls.Add(browse,2,row);}
+        public static void Field(TableLayoutPanel grid,int row,string label,Control control,Button browse){control.AccessibleName=label;grid.Controls.Add(new Label{Text=label,AutoSize=true,Anchor=AnchorStyles.Left},0,row);grid.Controls.Add(control,1,row);if(browse!=null)grid.Controls.Add(browse,2,row);}
         public static TableLayoutPanel Grid(int rows){var g=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=3,RowCount=rows,Padding=new Padding(4)};g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,144));g.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));g.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,115));for(int i=0;i<rows;i++)g.RowStyles.Add(new RowStyle(SizeType.Absolute,50));return g;}
     }
     public sealed class TargetChoice

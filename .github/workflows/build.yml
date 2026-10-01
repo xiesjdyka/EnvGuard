@@ -55,5 +55,6 @@ jobs:
           if ($version -ne ($env:RELEASE_TAG.Substring(1) + '.0')) { throw 'Tag and binary version differ' }
           gh release view $env:RELEASE_TAG --repo $env:GH_REPO 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published assets' }
-          gh release create $env:RELEASE_TAG ./out/EnvGuard-windows-x64.zip ./out/SHA256SUMS.txt --repo $env:GH_REPO --title "EnvGuard $env:RELEASE_TAG" --notes "Windows x64 portable. Read README before first setup. Warnings + manual emergency close, not network isolation. Verify SHA256SUMS.txt."
+          $notes = "Windows x64 便携工具：新设备首次确认环境基准，选择保护软件和日志文件；环境异常预警，手动紧急关闭配置范围内进程和专属服务。包内包含中文 README、Chrome 登录/浏览器调用前的防护指南和可选策略脚本。先准备并核对 Chrome 和代理环境，再保存基准。下载 ZIP 后核对 SHA256SUMS.txt。不是网络隔离器，不保证全流量防泄漏或账号安全。详见仓库 README。"
+          gh release create $env:RELEASE_TAG ./out/EnvGuard-windows-x64.zip ./out/SHA256SUMS.txt --repo $env:GH_REPO --title "EnvGuard $env:RELEASE_TAG" --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

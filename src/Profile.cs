@@ -57,7 +57,7 @@ namespace EnvGuard
             if (NetworkTimeoutMs < 500 || NetworkTimeoutMs > 10000) throw new InvalidDataException("网络检测时限无效。");
             if (String.IsNullOrWhiteSpace(ProxyExecutable) || !Path.IsPathRooted(ProxyExecutable) || !ValidHash(ProxyHash)) throw new InvalidDataException("代理监听程序身份不完整。");
             if (!String.IsNullOrEmpty(GitHubRepository) && !System.Text.RegularExpressions.Regex.IsMatch(GitHubRepository, @"\A[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\z")) throw new InvalidDataException("GitHub 仓库格式应为账号/仓库。");
-            if (String.IsNullOrWhiteSpace(LogFile) || !Path.IsPathRooted(LogFile) || !LogFile.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("请选择日志文件的绝对路径（.jsonl）。");
+            if (!LocalLogPath(LogFile)) throw new InvalidDataException("请选择本机磁盘的绝对日志路径（.jsonl）；不支持网络盘或共享路径，避免断网拖住紧急关闭。");
             if (Apps == null || Apps.Count == 0 || Apps.Count > 20) throw new InvalidDataException("请选择 1—20 个保护软件。");
             if (Settings == null || Settings.Count < 4 || Settings.Count > 100) throw new InvalidDataException("环境快照不完整。");
             foreach (AppTarget app in Apps)
@@ -73,6 +73,11 @@ namespace EnvGuard
             }
         }
         public static bool ValidHash(string value) { return value != null && value.Length == 64 && value.All(Uri.IsHexDigit); }
+        public static bool LocalLogPath(string path)
+        {
+            if(String.IsNullOrWhiteSpace(path) || !System.Text.RegularExpressions.Regex.IsMatch(path,@"\A[A-Za-z]:[\\/].+\.jsonl\z",System.Text.RegularExpressions.RegexOptions.IgnoreCase))return false;
+            try{var type=new DriveInfo(Path.GetPathRoot(path)).DriveType;return type==DriveType.Fixed || type==DriveType.Removable || type==DriveType.Ram;}catch{return false;}
+        }
         public static bool EqualPath(string a, string b)
         { return !String.IsNullOrEmpty(a) && !String.IsNullOrEmpty(b) && String.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
         public static bool Within(string path, string folder)

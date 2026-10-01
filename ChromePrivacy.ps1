@@ -47,7 +47,8 @@ function Save-State($State){
 }
 function Audit-Change([string]$Event,$Data){
     if([string]::IsNullOrWhiteSpace($LogFile)){throw '日志路径为空'}
-    $absolute=[IO.Path]::GetFullPath($LogFile);if(-not $absolute.EndsWith('.jsonl',[StringComparison]::OrdinalIgnoreCase)){throw '日志文件应为 .jsonl'}
+    $absolute=[IO.Path]::GetFullPath($LogFile);if($absolute -notmatch '^[A-Za-z]:[\\/].+\.jsonl$'){throw '日志必须是本机磁盘 .jsonl 文件，不支持网络共享'}
+    $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($absolute));if($drive.DriveType -notin @([IO.DriveType]::Fixed,[IO.DriveType]::Removable,[IO.DriveType]::Ram)){throw '不支持网络盘日志，避免断网时记录阻塞'}
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($absolute)) | Out-Null
     $line=@{schema=1;time=[DateTimeOffset]::Now.ToString('o');utc=[DateTime]::UtcNow.ToString('o');kind=$Event;data=$Data} | ConvertTo-Json -Depth 10 -Compress
     $bytes=[Text.Encoding]::UTF8.GetBytes($line+"`r`n")
