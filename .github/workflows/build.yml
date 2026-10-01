@@ -55,6 +55,6 @@ jobs:
           if ($version -ne ($env:RELEASE_TAG.Substring(1) + '.0')) { throw 'Tag and binary version differ' }
           gh release view $env:RELEASE_TAG --repo $env:GH_REPO 2>$null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published assets' }
-          $notes = "下载 EnvGuard-windows-x64.zip，解压后双击 EnvGuard.exe。首次配置现在有上一步/下一步：选软件、看 v2rayN 左下角的本机端口、核对后保存。日志默认已填好，想换位置直接选文件夹；可选检查收起来，每项都有查找提示。输入框和按钮统一对齐，放大布局也做了检查。环境变化会提醒，需要停用时点红色按钮，仍是手动紧急关闭。首页附新版 32 秒文字音效演示，去掉配音和底部字幕条。已有本地配置和日志保持不变；下载文件可用 SHA256SUMS.txt 核对。工具用于预警与应急，不保证账号安全。"
+          $notes = "下载 EnvGuard-windows-x64.zip，解压后双击 EnvGuard.exe，会自动请求管理员权限。先选软件，填本机 HTTP/mixed 端口，核对公网出口后保存；日志位置默认已填好。新增 Chrome 用户选择，不必手找配置文件；补充其他代理软件的配置方法。v2rayN 文件只用于额外检查该软件的设置，其他客户端留空。环境变化会提醒，需要停用时点红色按钮，仍是手动紧急关闭。首页演示改为 28 秒、60 帧连续衔接和轻节奏，无配音。已有本地配置和日志保持不变；下载文件可用 SHA256SUMS.txt 核对。工具用于预警与应急，不保证账号安全。"
           gh release create $env:RELEASE_TAG ./out/EnvGuard-windows-x64.zip ./out/SHA256SUMS.txt --repo $env:GH_REPO --title "EnvGuard $env:RELEASE_TAG" --notes $notes
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

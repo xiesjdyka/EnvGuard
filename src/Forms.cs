@@ -97,12 +97,12 @@ namespace EnvGuard
             software.Controls.Add(apps);software.Controls.Add(UI.Label("Claude 还没打开？点下方“已安装的软件”选择它。也可以选 EXE 或正在运行的软件。\r\n添加后会让你确认关闭范围；Chrome 如需一起关闭，另外添加。",70));software.Controls.Add(appButtons);
             var content=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=1,Margin=Padding.Empty};content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             var intro=UI.Label("先确认端口，日志保留默认就行。其他项目可以稍后再加。",40);intro.Font=new Font(Font.FontFamily,11,FontStyle.Bold);content.Controls.Add(intro);
-            content.Controls.Add(Setting("本机代理端口",port,"打开 v2rayN，看左下角“本地 [mixed:10808]”。填冒号后的数字，别填节点列表里的远程端口。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"在 v2rayN 主窗口的左下角，找到：\r\n\r\n本地：[mixed:10808]\r\n\r\n这里的示例应填 10808。以你自己的显示为准。\r\n不要填卖家给的节点端口，也不是 IP 地址。","找到本机代理端口",MessageBoxButtons.OK,MessageBoxIcon.Information))));
+            content.Controls.Add(Setting("本机代理端口",port,"v2rayN：看左下角 mixed 后的数字。其他软件：在设置里找本机 HTTP / mixed（混合）端口。\r\n填实际端口；不是服务器端口。仅 SOCKS 或仅 TUN、无 HTTP 端口的模式不支持。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"v2rayN：主窗口左下角“本地：[mixed:10808]”，这个示例填 10808。\r\n\r\n其他代理软件：在它的设置里找“本地端口 / HTTP 端口 / mixed 混合端口”，以实际设置为准，不要套用示例数字。\r\n\r\n程序连接本机 127.0.0.1 上的 HTTP/mixed 代理。只有 SOCKS 端口或只有 TUN 模式而没有这个入口时，不能直接配置。\r\n\r\n不能填服务器地址、远程节点端口或订阅链接。","找到本机代理端口",MessageBoxButtons.OK,MessageBoxIcon.Information))));
             content.Controls.Add(Setting("日志存放位置",logFile,"默认位置已填好，不用改。每次提醒、恢复和紧急关闭都会写到 events.jsonl；建议放本地磁盘。",UI.Button("换文件夹",(s,e)=>{using(var d=new FolderBrowserDialog{Description="选择本地日志文件夹；里面会追加 events.jsonl"}){try{d.SelectedPath=Path.GetDirectoryName(logFile.Text);}catch{}if(d.ShowDialog(this)==DialogResult.OK)logFile.Text=Path.Combine(d.SelectedPath,"events.jsonl");}})));
             content.Controls.Add(more);content.Controls.Add(advanced);advanced.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            advanced.Controls.Add(Setting("指定出口 IP",expected,"可留空。知道目标出口 IP 才填；留空会在检测后显示查到的出口，仍需你核对并确认。",null));
-            advanced.Controls.Add(Setting("Chrome 设置文件",browser,"可跳过。在 Chrome 打开 chrome://version，看 Profile Path。\r\n选择该文件夹里的 Preferences；只监测已保存设置，不会修改浏览器。",UI.Button("选择文件",(s,e)=>ChooseConfig(browser,true))));
-            advanced.Controls.Add(Setting("v2rayN 设置文件",v2ray,"可跳过。在 v2rayN 所在文件夹找 guiConfigs / guiNConfig.json；找不到先留空，不影响出口检查。",UI.Button("选择文件",(s,e)=>ChooseConfig(v2ray,false))));
+            advanced.Controls.Add(Setting("指定出口 IP",expected,"填公网出口 IP，不是节点列表里的服务器地址。不确定先留空，检测后再核对。\r\n确认保存后会以那个出口为基准；换线路需重新确认，不会自动接受新 IP。",null));
+            advanced.Controls.Add(Setting("检查 Chrome 设置",browser,"可跳过。点右侧选择登录 Claude 时使用的 Chrome 用户。\r\n只监测已保存的语言和 Chrome 隐私策略是否变化，不会修改浏览器，也不等于流量隔离。",UI.Button("选 Chrome 用户",(s,e)=>ChooseChrome())));
+            advanced.Controls.Add(Setting("检查 v2rayN 设置",v2ray,"仅 v2rayN 使用：选 guiConfigs / guiNConfig.json，额外盯已保存的节点、路由和 TUN 设置。\r\n其他代理软件留空；仍检查 HTTP/mixed 出口与监听程序，但不读取它们的内部配置。",UI.Button("选择文件",(s,e)=>ChooseConfig(v2ray,false))));
             advanced.Controls.Add(Setting("更新来源",repository,"已填本项目的账号/仓库，通常不用改。只用于手动“检查更新”；清空也能监测。",null));
             more.CheckedChanged+=(s,e)=>{advanced.Visible=more.Checked;more.Text=more.Checked?"更多检查（可选，点这里收起）":"更多检查（可选，点这里展开）";};
             environment.Controls.Add(content);
@@ -131,6 +131,23 @@ namespace EnvGuard
             string folder=chrome?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Google","Chrome","User Data"):null;
             if(!chrome)foreach(var process in Process.GetProcessesByName("v2rayN"))using(process)try{folder=Path.GetDirectoryName(process.MainModule.FileName);var nested=Path.Combine(folder,"guiConfigs");if(Directory.Exists(nested))folder=nested;break;}catch{}
             using(var d=new OpenFileDialog{Title=chrome?"选择 chrome://version 的 Profile Path 下的 Preferences":"选择 v2rayN 的 guiNConfig.json",Filter=chrome?"Chrome 设置|Preferences|所有文件|*.*":"v2rayN 设置|guiNConfig.json|JSON|*.json",InitialDirectory=folder??""})if(d.ShowDialog(this)==DialogResult.OK)target.Text=d.FileName;
+        }
+        internal static List<TargetChoice> ChromeChoices(string root)
+        {
+            var names=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+            try{string state=Path.Combine(root,"Local State");if(File.Exists(state)&&new FileInfo(state).Length<32*1024*1024){var data=new JavaScriptSerializer{MaxJsonLength=32*1024*1024}.DeserializeObject(File.ReadAllText(state)) as Dictionary<string,object>;object value;var profile=data!=null&&data.TryGetValue("profile",out value)?value as Dictionary<string,object>:null;var cache=profile!=null&&profile.TryGetValue("info_cache",out value)?value as Dictionary<string,object>:null;if(cache!=null)foreach(var entry in cache){var item=entry.Value as Dictionary<string,object>;if(item!=null&&item.TryGetValue("name",out value))names[entry.Key]=Convert.ToString(value);}}}catch{}
+            var result=new List<TargetChoice>();if(!Directory.Exists(root))return result;
+            foreach(string folder in Directory.GetDirectories(root)){string key=Path.GetFileName(folder),file=Path.Combine(folder,"Preferences");if((key=="Default"||key.StartsWith("Profile ",StringComparison.Ordinal))&&File.Exists(file)){string name;names.TryGetValue(key,out name);result.Add(new TargetChoice{Name=(String.IsNullOrWhiteSpace(name)?"Chrome 用户":name)+" / "+key,Path=file});}}
+            return result.OrderBy(x=>x.Name).ToList();
+        }
+        void ChooseChrome()
+        {
+            try{var choices=ChromeChoices(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Google","Chrome","User Data"));
+                using(var picker=new Form()){UI.Base(picker,"选择实际使用的 Chrome 用户",780,380);picker.Padding=new Padding(20);var list=new ListBox{Dock=DockStyle.Fill,DisplayMember="Name"};foreach(var choice in choices)list.Items.Add(choice.Name);if(list.Items.Count>0)list.SelectedIndex=0;
+                    var buttons=UI.Buttons();buttons.Controls.Add(UI.Button("确认选择",(s,e)=>{if(list.SelectedIndex>=0){browser.Text=choices[list.SelectedIndex].Path;picker.Close();}}));buttons.Controls.Add(UI.Button("手动选文件",(s,e)=>{ChooseConfig(browser,true);if(!String.IsNullOrWhiteSpace(browser.Text))picker.Close();}));buttons.Controls.Add(UI.Button("取消",(s,e)=>picker.Close()));
+                    var hint=UI.Label(choices.Count>0?"选你登录 Claude 时用的那个 Chrome 用户；不会启动或改动 Chrome。\r\n路径只是保存的设置文件。如果用便携版或自定义目录，点“手动选文件”。":"没找到标准目录里的 Chrome 用户。\r\n可在 Chrome 打开 chrome://version，按 Profile Path 手动选择其中的 Preferences。",70);picker.Controls.Add(list);picker.Controls.Add(hint);picker.Controls.Add(buttons);picker.ShowDialog(this);
+                }
+            }catch(Exception ex){UI.Error("无法列出 Chrome 用户："+ex.Message+"。可以先跳过这一项。");}
         }
         void Navigation(){back.Enabled=!busy&&tabs.SelectedIndex>0;next.Visible=tabs.SelectedIndex<2;next.Text=tabs.SelectedIndex==0?"下一步：配环境":"检测并核对";capture.Visible=tabs.SelectedIndex==2;save.Visible=tabs.SelectedIndex==2;}
         void InvalidateDraft(){draft=null;confirm.Checked=false;save.Enabled=false;review.Clear();}
