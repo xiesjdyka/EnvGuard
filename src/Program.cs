@@ -4,13 +4,13 @@ using System.IO;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
-[assembly:System.Reflection.AssemblyVersion("1.2.2.0")]
-[assembly:System.Reflection.AssemblyFileVersion("1.2.2.0")]
+[assembly:System.Reflection.AssemblyVersion("1.2.3.0")]
+[assembly:System.Reflection.AssemblyFileVersion("1.2.3.0")]
 namespace EnvGuard
 {
     public static class Program
     {
-        public const string Version="1.2.2";
+        public const string Version="1.2.3";
         public const string DefaultRepository="xiesjdyka/EnvGuard";
         [STAThread] public static int Main(string[] args)
         {

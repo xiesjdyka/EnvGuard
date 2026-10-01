@@ -4,17 +4,22 @@
 
 ## 第一步：执行代码
 
-下载并解压 [EnvGuard 程序包](https://github.com/xiesjdyka/EnvGuard/releases/latest/download/EnvGuard-windows-x64.zip)。进入解压后的文件夹，在空白处右键，选 **在终端中打开**。
+1. 下载并解压 [EnvGuard 程序包](https://github.com/xiesjdyka/EnvGuard/releases/latest/download/EnvGuard-windows-x64.zip)，打开解压后的文件夹。点击文件夹顶部地址栏，复制这个文件夹的路径。
+2. **右键左下角 Windows 开始图标**，选 **终端（管理员）**，或菜单里的 **Windows PowerShell（管理员）**。Windows 询问权限时点“是”；仍用同一个 Windows 账号，不要换另一个管理员账号运行。如果终端打开的是命令提示符，切换到 PowerShell 标签页。
+3. 把下面第一行引号里的“解压文件夹路径”换成你刚才复制的路径，然后把这两行粘贴到管理员窗口，按回车。
 
-复制下面这一整行，粘贴到终端，按回车：
+**第一行是进入文件夹，第二行才是执行代码。** 这样就不会因为管理员窗口默认在别的目录而找不到脚本。
 
 ```powershell
+Set-Location -LiteralPath '解压文件夹路径'
 pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -Preset Basic -ConfirmAllChromeProfiles
 ```
 
+例如你复制的路径是 `D:\EnvGuard`，第一行就写 `Set-Location -LiteralPath 'D:\EnvGuard'`。这里是例子，换成你自己的路径。
+
 它会执行包内代码，设置当时那两项：限制 WebRTC 不经过代理的 UDP 连接、关闭提前加载。**影响当前 Windows 用户的所有 Chrome 窗口**，语音、视频功能可能受影响；代理软件、语言和时区不会被这行代码修改。
 
-看到“2 项设置已写入”后，继续下一步。若报“拒绝访问”，用同一个账号以管理员身份打开 PowerShell 7，进入这个解压文件夹再执行；找不到 `pwsh`，说明需要先 [安装 PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。其他报错先停下看原因，不要关闭安全软件强行运行。
+看到“2 项设置已写入”后，继续下一步。即使打开的是蓝色 Windows PowerShell 窗口，上面第二行也会用 `pwsh`（PowerShell 7）来运行脚本。找不到 `pwsh`，需要先 [安装 PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。其他报错先停下看原因，不要关闭安全软件强行运行。
 
 ## 第二步：在 Chrome 看有没有生效
 
@@ -32,24 +37,25 @@ pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -Preset Basic -ConfirmAllC
 
 如果没出现，或状态报错，先别继续登录，保留截图排查。这里是在确认两项设置生效，不是账号安全评分。
 
-## 第三步：改首选语言
+## 第三步：移除中文，只留下英文
 
-如果这个 Chrome 想主要用英文：
+按当时这个专用 Chrome 的设置方式做：
 
 1. 地址栏输入 `chrome://settings/languages`，按回车。
-2. 在 **Preferred languages / 首选语言** 里添加 **English (United States)**。
+2. 在 **Preferred languages / 首选语言** 里确认有 **English** 或 **English (United States)**；没有就点 **Add languages / 添加语言** 加入英文。
 3. 点英文右侧的三个点，选 **Move to the top / 移到顶部**。
-4. 想让菜单也变英文，就勾 **Display Google Chrome in this language / 以这种语言显示 Google Chrome**，再点 **Relaunch / 重新启动**。
-5. 不再需要的 Chinese 条目，点右侧三个点 → **Remove / 移除**。还要用中文就保留。
+4. 勾 **Display Google Chrome in this language / 以这种语言显示 Google Chrome**，点 **Relaunch / 重新启动**。先切换菜单语言，再移除原来的中文。
+5. **把所有 Chinese / 中文条目逐个移除**：点每个中文条目右侧的三个点 → **Remove / 移除**。简体、繁体等中文条目都不要留在首选语言列表里。
+6. 重新打开这个 Chrome，回到语言页面检查：**列表里只剩英文，没有任何 Chinese / 中文条目**，再刷新你看的检测页面。
 
-**菜单变英文，不等于首选语言里已经没有中文。** 当时“改了还是显示中文”，就是列表里还有中文条目。改好后重开 Chrome，再刷新你看的检测页面。按钮名称可以对照 [Google 的语言设置说明](https://support.google.com/chrome/answer/173424?co=GENIE.Platform%3DDesktop&hl=zh-Hans)。
+**只把英文移到第一位不够，中文条目也要移除。** 当时“改了还是显示中文”，就是首选语言列表里还留着中文。这个步骤去掉的是列表中的中文信号，不会隐藏其他检查项。按钮名称可以对照 [Google 的语言设置说明](https://support.google.com/chrome/answer/173424?co=GENIE.Platform%3DDesktop&hl=zh-Hans)。
 
-到这里就是完整流程了。字体、Emoji 那两项不用继续折腾：改默认字体不会隐藏系统字体，Microsoft style 也不是 IP 泄露提示。语言按自己的需要选，第三方分数不是 Claude 的账号安全判定。
+到这里就是完整流程了。字体、Emoji 那两项不用继续折腾：改默认字体不会隐藏系统字体，Microsoft style 也不是 IP 泄露提示。第三方分数不是 Claude 的账号安全判定。
 
 <details>
 <summary>以后想恢复代码改过的两项，点这里</summary>
 
-在同一个解压文件夹打开终端，执行：
+按第一步的方法打开管理员 PowerShell 窗口，先进入同一个解压文件夹，再执行：
 
 ```powershell
 pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -Preset Basic -ConfirmAllChromeProfiles
