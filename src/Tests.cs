@@ -77,11 +77,12 @@ namespace EnvGuard
         public static int UIShots(string directory)
         {
             Directory.CreateDirectory(directory);var p=Demo(directory);
-            using(var wizard=new SetupForm(Path.Combine(directory,"never-saved.json"),p)){Shot(wizard,Path.Combine(directory,"setup.png"));wizard.PreviewPage(1,p);Shot(wizard,Path.Combine(directory,"environment.png"));wizard.PreviewPage(2,p);Shot(wizard,Path.Combine(directory,"baseline.png"));}
+            using(var wizard=new SetupForm(Path.Combine(directory,"never-saved.json"),p)){Shot(wizard,Path.Combine(directory,"setup.png"));wizard.PreviewPage(1,p);Shot(wizard,Path.Combine(directory,"environment.png"));Assert(!wizard.AdvancedShown,"optional checks collapsed initially");Assert(wizard.FieldsAligned,"setup input edges and heights aligned");wizard.PreviewAdvanced(true);Shot(wizard,Path.Combine(directory,"environment-advanced.png"));Assert(wizard.AdvancedShown,"optional checks explicitly expandable");wizard.PreviewPage(2,p);Shot(wizard,Path.Combine(directory,"baseline.png"));}
+            using(var wizard=new SetupForm(Path.Combine(directory,"never-saved-scaled.json"),p)){wizard.PreviewPage(1,p);wizard.Scale(new SizeF(1.5f,1.5f));Shot(wizard,Path.Combine(directory,"environment-scaled.png"));Assert(wizard.FieldsAligned,"inputs aligned at simulated 150 percent scaling");}
             using(var main=new MainForm(p,"",true)){main.Render(new HealthState{Time=DateTimeOffset.Now,NetworkReady=true,ProcessCount=4},false);Shot(main,Path.Combine(directory,"monitor.png"));}
             var initial=new HealthState{Time=DateTimeOffset.Now,Issues=new[]{"网络检查连续两轮未确认。不是已确定代理掉线。","时区与确认的基准不同。"}};
             using(var alert=new AlertForm(initial,()=>System.Threading.Tasks.Task.FromResult(0))){Shot(alert,Path.Combine(directory,"warning.png"));alert.UpdateState(new HealthState{Time=DateTimeOffset.Now,NetworkReady=true});Shot(alert,Path.Combine(directory,"recovered.png"));}
-            File.WriteAllText(Path.Combine(directory,"ui-result.txt"),"Synthetic data only; no monitor, network probes or emergency actions started.");return 0;
+            File.WriteAllText(Path.Combine(directory,"ui-result.txt"),"PASS: 4 UI layout/disclosure assertions, including simulated 150 percent scaling.\r\nSynthetic data only; no monitor, network probes or emergency actions started.");return 0;
         }
         static void EmergencyFixture(string root,string fixture)
         {

@@ -79,35 +79,60 @@ namespace EnvGuard
         readonly string profileFile;readonly ListBox apps=new ListBox{Dock=DockStyle.Fill,HorizontalScrollbar=true};
         readonly TextBox port=UI.Text("10808"),expected=UI.Text(""),logFile=UI.Text(""),browser=UI.Text(""),v2ray=UI.Text(""),repository=UI.Text("");
         readonly TextBox review=UI.Details();readonly CheckBox confirm=new CheckBox{Text="我已核对出口 IP、环境和软件范围，确认这是正确基准",AutoSize=true};
-        readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};readonly Button save,capture;readonly Label status=UI.Label("尚未生成基准；程序不会替你判断当前代理是否可靠。",36);
+        readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};readonly Button save,capture,back,next;readonly Label status=UI.Label("先选软件，再核对环境；保存前会让你确认。",36);
+        readonly CheckBox more=new CheckBox{Text="更多检查（可选，点这里展开）",AutoSize=true,Margin=new Padding(0,12,0,8)};
+        readonly TableLayoutPanel advanced=new TableLayoutPanel{AutoSize=true,Dock=DockStyle.Top,ColumnCount=1,Visible=false};
+        readonly ErrorProvider errors=new ErrorProvider();Control invalid;
         Profile draft;DateTime captured;bool busy;public Profile Result;
         public SetupForm(string file,Profile previous)
         {
-            profileFile=file;UI.Base(this,"EnvGuard · 首次配置 / 重新确认",920,700);Padding=new Padding(22);
+            profileFile=file;UI.Base(this,"EnvGuard · 首次配置 / 重新确认",960,700);Padding=new Padding(24);errors.ContainerControl=this;
             var heading=UI.Label("确认环境，再开始监测",45);heading.Font=new Font(Font.FontFamily,18,FontStyle.Bold);
-            var subtitle=UI.Label("此配置只属于当前电脑和用户；不会锁死日期、当前时间或夏令时偏移。",38);
-            var software=new TabPage("1  保护软件"){Padding=new Padding(12)};var environment=new TabPage("2  环境与日志"){Padding=new Padding(12),AutoScroll=true};var baseline=new TabPage("3  核对基准"){Padding=new Padding(12)};
+            var subtitle=UI.Label("只需配置一次。正常走时和夏令时切换不会触发提醒。",38);subtitle.ForeColor=Color.FromArgb(82,98,115);
+            var software=new TabPage("1  选软件"){Padding=new Padding(20),BackColor=Color.White};var environment=new TabPage("2  配环境"){Padding=new Padding(20),AutoScroll=true,BackColor=Color.White};var baseline=new TabPage("3  确认并保存"){Padding=new Padding(20),BackColor=Color.White};
             tabs.TabPages.AddRange(new[]{software,environment,baseline});
             var appButtons=UI.Buttons();appButtons.Controls.Add(UI.Button("选择 EXE",async(s,e)=>{using(var d=new OpenFileDialog{Filter="软件 (*.exe)|*.exe"})if(d.ShowDialog()==DialogResult.OK)await Add(new TargetChoice{Name=Path.GetFileNameWithoutExtension(d.FileName),Path=d.FileName});}));
-            appButtons.Controls.Add(UI.Button("正在运行的软件",async(s,e)=>{using(var d=new PickerForm(false))if(d.ShowDialog(this)==DialogResult.OK)await Add(d.Selected);}));appButtons.Controls.Add(UI.Button("已安装的软件包",async(s,e)=>{using(var d=new PickerForm(true))if(d.ShowDialog(this)==DialogResult.OK)await Add(d.Selected);}));
+            appButtons.Controls.Add(UI.Button("正在运行的软件",async(s,e)=>{using(var d=new PickerForm(false))if(d.ShowDialog(this)==DialogResult.OK)await Add(d.Selected);}));appButtons.Controls.Add(UI.Button("已安装的软件",async(s,e)=>{using(var d=new PickerForm(true))if(d.ShowDialog(this)==DialogResult.OK)await Add(d.Selected);}));
             appButtons.Controls.Add(UI.Button("移除",(s,e)=>{if(apps.SelectedItem!=null){apps.Items.Remove(apps.SelectedItem);InvalidateDraft();}}));
-            software.Controls.Add(apps);software.Controls.Add(UI.Label("选定的软件不会自动启动或自动关闭。可添加多个；先关闭不需要保护的软件再选择。",50));software.Controls.Add(appButtons);
-            var grid=UI.Grid(6);
-            UI.Field(grid,0,"本机代理端口",port,null);UI.Field(grid,1,"预期 IP（可留空）",expected,null);
-            UI.Field(grid,2,"日志文件",logFile,UI.Button("选择文件",(s,e)=>{using(var d=new SaveFileDialog{Filter="追加日志 (*.jsonl)|*.jsonl",FileName="events.jsonl",OverwritePrompt=false})if(d.ShowDialog()==DialogResult.OK)logFile.Text=d.FileName;}));
-            UI.Field(grid,3,"Chrome 配置（可选）",browser,UI.Button("浏览",(s,e)=>UI.Browse(browser,"选择所用 Chrome 配置目录的 Preferences","Preferences|Preferences|所有文件|*.*")));
-            UI.Field(grid,4,"v2rayN 配置（可选）",v2ray,UI.Button("浏览",(s,e)=>UI.Browse(v2ray,"选择 guiNConfig.json","v2rayN 设置|guiNConfig.json|JSON|*.json")));
-            UI.Field(grid,5,"更新仓库（可选）",repository,null);
-            environment.Controls.Add(grid);environment.Controls.Add(UI.Label("仓库填写“账号/仓库”。网络检查始终走上述本机代理；浏览器、v2rayN 只检查选定文件的已保存配置。\r\n环境快照不是防泄漏隔离，也不能保证软件的每一条连接都走代理。",90));
+            software.Controls.Add(apps);software.Controls.Add(UI.Label("Claude 还没打开？点下方“已安装的软件”选择它。也可以选 EXE 或正在运行的软件。\r\n添加后会让你确认关闭范围；Chrome 如需一起关闭，另外添加。",70));software.Controls.Add(appButtons);
+            var content=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=1,Margin=Padding.Empty};content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            var intro=UI.Label("先确认端口，日志保留默认就行。其他项目可以稍后再加。",40);intro.Font=new Font(Font.FontFamily,11,FontStyle.Bold);content.Controls.Add(intro);
+            content.Controls.Add(Setting("本机代理端口",port,"打开 v2rayN，看左下角“本地 [mixed:10808]”。填冒号后的数字，别填节点列表里的远程端口。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"在 v2rayN 主窗口的左下角，找到：\r\n\r\n本地：[mixed:10808]\r\n\r\n这里的示例应填 10808。以你自己的显示为准。\r\n不要填卖家给的节点端口，也不是 IP 地址。","找到本机代理端口",MessageBoxButtons.OK,MessageBoxIcon.Information))));
+            content.Controls.Add(Setting("日志存放位置",logFile,"默认位置已填好，不用改。每次提醒、恢复和紧急关闭都会写到 events.jsonl；建议放本地磁盘。",UI.Button("换文件夹",(s,e)=>{using(var d=new FolderBrowserDialog{Description="选择本地日志文件夹；里面会追加 events.jsonl"}){try{d.SelectedPath=Path.GetDirectoryName(logFile.Text);}catch{}if(d.ShowDialog(this)==DialogResult.OK)logFile.Text=Path.Combine(d.SelectedPath,"events.jsonl");}})));
+            content.Controls.Add(more);content.Controls.Add(advanced);advanced.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            advanced.Controls.Add(Setting("指定出口 IP",expected,"可留空。知道目标出口 IP 才填；留空会在检测后显示查到的出口，仍需你核对并确认。",null));
+            advanced.Controls.Add(Setting("Chrome 设置文件",browser,"可跳过。在 Chrome 打开 chrome://version，看 Profile Path。\r\n选择该文件夹里的 Preferences；只监测已保存设置，不会修改浏览器。",UI.Button("选择文件",(s,e)=>ChooseConfig(browser,true))));
+            advanced.Controls.Add(Setting("v2rayN 设置文件",v2ray,"可跳过。在 v2rayN 所在文件夹找 guiConfigs / guiNConfig.json；找不到先留空，不影响出口检查。",UI.Button("选择文件",(s,e)=>ChooseConfig(v2ray,false))));
+            advanced.Controls.Add(Setting("更新来源",repository,"已填本项目的账号/仓库，通常不用改。只用于手动“检查更新”；清空也能监测。",null));
+            more.CheckedChanged+=(s,e)=>{advanced.Visible=more.Checked;more.Text=more.Checked?"更多检查（可选，点这里收起）":"更多检查（可选，点这里展开）";};
+            environment.Controls.Add(content);
             confirm.Dock=DockStyle.Bottom;confirm.Height=42;baseline.Controls.Add(review);baseline.Controls.Add(confirm);
-            var buttons=UI.Buttons();capture=UI.Button("检测并生成快照",async(s,e)=>await CaptureBaseline());save=UI.Button("保存并开始监测",async(s,e)=>await Save());save.Enabled=false;buttons.Controls.Add(capture);buttons.Controls.Add(save);buttons.Controls.Add(UI.Button("取消",(s,e)=>Close()));
-            Controls.Add(tabs);Controls.Add(subtitle);Controls.Add(heading);Controls.Add(status);Controls.Add(buttons);
+            var buttons=UI.Buttons();back=UI.Button("上一步",(s,e)=>{if(tabs.SelectedIndex>0)tabs.SelectedIndex--;});next=UI.Button("下一步：配环境",async(s,e)=>{if(tabs.SelectedIndex==0){if(apps.Items.Count==0){UI.Error("先从下方添加你要保护的软件，例如 Claude。");return;}tabs.SelectedIndex=1;}else await CaptureBaseline();});capture=UI.Button("重新检测",async(s,e)=>await CaptureBaseline());save=UI.Button("保存并开始监测",async(s,e)=>await Save());save.Enabled=false;buttons.Controls.Add(back);buttons.Controls.Add(next);buttons.Controls.Add(capture);buttons.Controls.Add(save);buttons.Controls.Add(UI.Button("取消",(s,e)=>Close()));
+            status.Dock=DockStyle.Bottom;status.ForeColor=UI.Blue;Controls.Add(tabs);Controls.Add(subtitle);Controls.Add(heading);Controls.Add(status);Controls.Add(buttons);tabs.SelectedIndexChanged+=(s,e)=>Navigation();Navigation();
+            foreach(Button button in buttons.Controls){button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderColor=Color.FromArgb(200,209,218);button.BackColor=Color.White;button.ForeColor=UI.Ink;}
+            foreach(var button in new[]{next,save}){button.BackColor=UI.Blue;button.ForeColor=Color.White;button.FlatAppearance.BorderSize=0;}
             logFile.Text=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"EnvGuard","logs","events.jsonl");
             repository.Text=Program.DefaultRepository;
-            if(previous!=null){foreach(var a in previous.Apps)apps.Items.Add(a);port.Text=previous.ProxyPort.ToString();expected.Text=previous.ExitIp;logFile.Text=previous.LogFile;browser.Text=previous.BrowserPreferences;v2ray.Text=previous.V2rayConfig;repository.Text=previous.GitHubRepository;}
+            if(previous!=null){foreach(var a in previous.Apps)apps.Items.Add(a);port.Text=previous.ProxyPort.ToString();expected.Text=previous.ExitIp;logFile.Text=previous.LogFile;browser.Text=previous.BrowserPreferences;v2ray.Text=previous.V2rayConfig;repository.Text=previous.GitHubRepository;more.Checked=!String.IsNullOrEmpty(previous.BrowserPreferences)||!String.IsNullOrEmpty(previous.V2rayConfig);}
             foreach(var box in new[]{port,expected,logFile,browser,v2ray,repository})box.TextChanged+=(s,e)=>InvalidateDraft();confirm.CheckedChanged+=(s,e)=>save.Enabled=confirm.Checked && draft!=null && !busy;
             FormClosing+=(s,e)=>{if(busy){e.Cancel=true;status.Text="正在检测，请等当前操作完成再关闭。";}};
         }
+        static TableLayoutPanel Setting(string title,TextBox box,string hint,Button action)
+        {
+            var row=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=3,RowCount=2,Margin=new Padding(0,0,0,12)};
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,148));row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,132));row.RowStyles.Add(new RowStyle(SizeType.Absolute,44));row.RowStyles.Add(new RowStyle(SizeType.Absolute,48));
+            row.Controls.Add(new Label{Text=title,AutoSize=false,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,Margin=Padding.Empty},0,0);
+            box.Dock=DockStyle.None;box.Anchor=AnchorStyles.Left|AnchorStyles.Right;box.Margin=new Padding(0,0,12,0);box.AccessibleName=title;box.AccessibleDescription=hint;row.Controls.Add(box,1,0);
+            if(action!=null){action.Dock=DockStyle.Fill;action.AutoSize=false;action.MinimumSize=Size.Empty;action.Margin=new Padding(0,5,0,5);row.Controls.Add(action,2,0);}
+            var help=new Label{Text=hint,AutoSize=false,Dock=DockStyle.Fill,ForeColor=Color.FromArgb(82,98,115),Margin=new Padding(0,2,0,0)};row.Controls.Add(help,1,1);row.SetColumnSpan(help,2);return row;
+        }
+        void ChooseConfig(TextBox target,bool chrome)
+        {
+            string folder=chrome?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Google","Chrome","User Data"):null;
+            if(!chrome)foreach(var process in Process.GetProcessesByName("v2rayN"))using(process)try{folder=Path.GetDirectoryName(process.MainModule.FileName);var nested=Path.Combine(folder,"guiConfigs");if(Directory.Exists(nested))folder=nested;break;}catch{}
+            using(var d=new OpenFileDialog{Title=chrome?"选择 chrome://version 的 Profile Path 下的 Preferences":"选择 v2rayN 的 guiNConfig.json",Filter=chrome?"Chrome 设置|Preferences|所有文件|*.*":"v2rayN 设置|guiNConfig.json|JSON|*.json",InitialDirectory=folder??""})if(d.ShowDialog(this)==DialogResult.OK)target.Text=d.FileName;
+        }
+        void Navigation(){back.Enabled=!busy&&tabs.SelectedIndex>0;next.Visible=tabs.SelectedIndex<2;next.Text=tabs.SelectedIndex==0?"下一步：配环境":"检测并核对";capture.Visible=tabs.SelectedIndex==2;save.Visible=tabs.SelectedIndex==2;}
         void InvalidateDraft(){draft=null;confirm.Checked=false;save.Enabled=false;review.Clear();}
         async Task Add(TargetChoice choice)
         {
@@ -120,11 +145,12 @@ namespace EnvGuard
         }
         Profile Input()
         {
-            int n;if(!Int32.TryParse(port.Text,out n) || n<1 || n>65535)throw new InvalidOperationException("代理端口应为 1—65535。");if(apps.Items.Count==0)throw new InvalidOperationException("先选择需要保护的软件。");
+            errors.Clear();invalid=null;int n;if(!Int32.TryParse(port.Text,out n) || n<1 || n>65535){invalid=port;tabs.SelectedIndex=1;errors.SetError(port,"填 v2rayN 左下角 mixed 后的数字（1—65535）。");throw new InvalidOperationException("代理端口不正确。请看输入框旁的“去哪找？”。");}if(apps.Items.Count==0){tabs.SelectedIndex=0;throw new InvalidOperationException("先选择需要保护的软件。");}
+            IPAddress ip;if(!String.IsNullOrWhiteSpace(expected.Text)&&!IPAddress.TryParse(expected.Text.Trim(),out ip)){more.Checked=true;tabs.SelectedIndex=1;invalid=expected;errors.SetError(expected,"这里填 IP 地址，不填网址；不确定可以留空。");throw new InvalidOperationException("指定出口 IP 格式不正确；不知道目标 IP 可以留空。");}
             string file=Path.GetFullPath(logFile.Text);if(!file.EndsWith(".jsonl",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("日志文件需要 .jsonl 扩展名。");
             return new Profile{ProxyPort=n,ExitIp=expected.Text.Trim(),LogFile=file,Apps=apps.Items.Cast<AppTarget>().ToList(),BrowserPreferences=browser.Text.Trim(),V2rayConfig=v2ray.Text.Trim(),GitHubRepository=repository.Text.Trim()};
         }
-        void Busy(bool value){busy=value;capture.Enabled=!value;tabs.Enabled=!value;save.Enabled=!value && confirm.Checked && draft!=null;}
+        void Busy(bool value){busy=value;capture.Enabled=!value;next.Enabled=!value;tabs.Enabled=!value;save.Enabled=!value && confirm.Checked && draft!=null;Navigation();if(!value&&invalid!=null){invalid.Focus();}}
         async Task CaptureBaseline()
         {
             Busy(true);status.Text="正在核对代理身份与两个独立出口…";try{var p=Input();await Task.Run(async()=>{foreach(var app in p.Apps){app.Hash=Profile.FileHash(app.Executable);foreach(var service in app.Services)Services.Verify(service);}await EnvironmentChecker.Capture(p);});
@@ -147,6 +173,10 @@ namespace EnvGuard
             lines.Add("");foreach(var pair in p.Settings)lines.Add(pair.Key+"："+pair.Value);lines.Add("");lines.Add("正常时间流逝、自动夏令时切换不算异常。未选择的浏览器配置、字体和全流量路径不在检测范围。");return String.Join("\r\n",lines);
         }
         public void PreviewPage(int page,Profile p){review.Text=Describe(p);tabs.SelectedIndex=page;}
+        public void PreviewAdvanced(bool value){more.Checked=value;}
+        public bool AdvancedShown {get{return more.Checked;}}
+        public bool FieldsAligned {get{return port.Left==logFile.Left&&port.Width==logFile.Width&&browser.Width==v2ray.Width&&port.Height==logFile.Height;}}
+        protected override void Dispose(bool disposing){if(disposing)errors.Dispose();base.Dispose(disposing);}
     }
     public sealed class AlertForm : Form
     {

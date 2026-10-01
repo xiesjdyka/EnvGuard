@@ -20,6 +20,7 @@ if ($Test) {
     $uiDir = Join-Path $testDir 'ui'
     $uiProcess = Start-Process -FilePath $programPath -ArgumentList @('--ui-smoke-test', ('"' + $uiDir + '"')) -PassThru -Wait -WindowStyle Hidden
     if ($uiProcess.ExitCode -ne 0) { throw '界面渲染测试失败。' }
+    Get-Content -LiteralPath (Join-Path $uiDir 'ui-result.txt')
     & (Join-Path $projectDir 'ChromePrivacy.ps1') -Mode SelfTest
     Write-Output "界面检查图片：$uiDir"
 }
