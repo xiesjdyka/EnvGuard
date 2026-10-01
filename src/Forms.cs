@@ -77,11 +77,11 @@ namespace EnvGuard
     public sealed class SetupForm : Form
     {
         readonly string profileFile;readonly ListBox apps=new ListBox{Dock=DockStyle.Fill,HorizontalScrollbar=true};
-        readonly TextBox port=UI.Text("10808"),expected=UI.Text(""),logFile=UI.Text(""),browser=UI.Text(""),v2ray=UI.Text(""),repository=UI.Text("");
+        readonly TextBox port=UI.Text(""),expected=UI.Text(""),logFile=UI.Text(""),browser=UI.Text(""),v2ray=UI.Text(""),repository=UI.Text("");
         readonly TextBox review=UI.Details();readonly CheckBox confirm=new CheckBox{Text="我已核对出口 IP、环境和软件范围，确认这是正确基准",AutoSize=true};
         readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};readonly Button save,capture,back,next;readonly Label status=UI.Label("先选软件，再核对环境；保存前会让你确认。",36);
         readonly CheckBox more=new CheckBox{Text="更多检查（可选，点这里展开）",AutoSize=true,Margin=new Padding(0,12,0,8)};
-        readonly TableLayoutPanel advanced=new TableLayoutPanel{AutoSize=true,Dock=DockStyle.Top,ColumnCount=1,Visible=false};
+        readonly TableLayoutPanel advanced=new TableLayoutPanel{AutoSize=true,Dock=DockStyle.Top,ColumnCount=1,Visible=false,Margin=Padding.Empty};
         readonly ErrorProvider errors=new ErrorProvider();Control invalid;
         Profile draft;DateTime captured;bool busy;public Profile Result;
         public SetupForm(string file,Profile previous)
@@ -97,12 +97,14 @@ namespace EnvGuard
             software.Controls.Add(apps);software.Controls.Add(UI.Label("Claude 还没打开？点下方“已安装的软件”选择它。也可以选 EXE 或正在运行的软件。\r\n添加后会让你确认关闭范围；Chrome 如需一起关闭，另外添加。",70));software.Controls.Add(appButtons);
             var content=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=1,Margin=Padding.Empty};content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             var intro=UI.Label("先确认端口，日志保留默认就行。其他项目可以稍后再加。",40);intro.Font=new Font(Font.FontFamily,11,FontStyle.Bold);content.Controls.Add(intro);
-            content.Controls.Add(Setting("本机代理端口",port,"v2rayN：看左下角 mixed 后的数字。其他软件：在设置里找本机 HTTP / mixed（混合）端口。\r\n填实际端口；不是服务器端口。仅 SOCKS 或仅 TUN、无 HTTP 端口的模式不支持。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"v2rayN：主窗口左下角“本地：[mixed:10808]”，这个示例填 10808。\r\n\r\n其他代理软件：在它的设置里找“本地端口 / HTTP 端口 / mixed 混合端口”，以实际设置为准，不要套用示例数字。\r\n\r\n程序连接本机 127.0.0.1 上的 HTTP/mixed 代理。只有 SOCKS 端口或只有 TUN 模式而没有这个入口时，不能直接配置。\r\n\r\n不能填服务器地址、远程节点端口或订阅链接。","找到本机代理端口",MessageBoxButtons.OK,MessageBoxIcon.Information))));
-            content.Controls.Add(Setting("日志存放位置",logFile,"默认位置已填好，不用改。每次提醒、恢复和紧急关闭都会写到 events.jsonl；建议放本地磁盘。",UI.Button("换文件夹",(s,e)=>{using(var d=new FolderBrowserDialog{Description="选择本地日志文件夹；里面会追加 events.jsonl"}){try{d.SelectedPath=Path.GetDirectoryName(logFile.Text);}catch{}if(d.ShowDialog(this)==DialogResult.OK)logFile.Text=Path.Combine(d.SelectedPath,"events.jsonl");}})));
+            content.Controls.Add(Setting("代理端口（数字）",port,"打开你正在用的代理软件，在设置里找 HTTP 端口或 mixed / 混合端口，填它后面的数字。\r\n不管软件叫什么，找的是同一个东西。别填节点列表里的服务器端口。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"1. 打开你正在使用的代理软件，进入设置。\r\n2. 找“端口”或“本地代理”一类的页面。\r\n3. 看 HTTP 端口，或者 mixed / 混合端口，把数字填进来。\r\n\r\n举个例子：v2rayN 左下角如果显示 [mixed:10808]，就填 10808。它只是例子；其他软件以自己的设置为准。\r\n\r\n如果只有 SOCKS 端口，或只开了 TUN / 虚拟网卡，请先查看软件是否提供 HTTP 或混合端口。这两个名字的入口才适用于 EnvGuard；不要把 SOCKS 的数字随便填过来。\r\n\r\n不用填节点地址、账号、密码，也不用找代理软件的配置文件。","我该填哪个数字？",MessageBoxButtons.OK,MessageBoxIcon.Information))));
+            content.Controls.Add(Setting("日志存放位置",logFile,"已经填好了，直接用就行。每次提醒、恢复和紧急关闭都会留下记录。\r\n想放在别处，点右边“换文件夹”，选电脑上的文件夹。",UI.Button("换文件夹",(s,e)=>{using(var d=new FolderBrowserDialog{Description="选择本地日志文件夹；里面会追加 events.jsonl"}){try{d.SelectedPath=Path.GetDirectoryName(logFile.Text);}catch{}if(d.ShowDialog(this)==DialogResult.OK)logFile.Text=Path.Combine(d.SelectedPath,"events.jsonl");}})));
+            var guide=new LinkLabel{Text="Chrome 登录前怎么准备？查看操作方法",AutoSize=true,Margin=new Padding(148,0,0,4)};guide.LinkClicked+=(s,e)=>{try{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Chrome浏览器怎么准备.html");Process.Start(new ProcessStartInfo(File.Exists(path)?path:"https://github.com/xiesjdyka/EnvGuard/blob/main/CHROME-PRIVACY.md"){UseShellExecute=true});}catch(Exception ex){UI.Error("说明打开失败："+ex.Message);}};content.Controls.Add(guide);
             content.Controls.Add(more);content.Controls.Add(advanced);advanced.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            advanced.Controls.Add(Setting("指定出口 IP",expected,"填公网出口 IP，不是节点列表里的服务器地址。不确定先留空，检测后再核对。\r\n确认保存后会以那个出口为基准；换线路需重新确认，不会自动接受新 IP。",null));
-            advanced.Controls.Add(Setting("检查 Chrome 设置",browser,"可跳过。点右侧选择登录 Claude 时使用的 Chrome 用户。\r\n只监测已保存的语言和 Chrome 隐私策略是否变化，不会修改浏览器，也不等于流量隔离。",UI.Button("选 Chrome 用户",(s,e)=>ChooseChrome())));
-            advanced.Controls.Add(Setting("检查 v2rayN 设置",v2ray,"仅 v2rayN 使用：选 guiConfigs / guiNConfig.json，额外盯已保存的节点、路由和 TUN 设置。\r\n其他代理软件留空；仍检查 HTTP/mixed 出口与监听程序，但不读取它们的内部配置。",UI.Button("选择文件",(s,e)=>ChooseConfig(v2ray,false))));
+            advanced.Controls.Add(Setting("指定出口 IP",expected,"不知道就留空，下一步会显示查到的 IP，再由你核对。\r\n知道自己要用哪个公网出口才填写；节点服务器的地址不一定是出口。",null));
+            browser.ReadOnly=true;
+            advanced.Controls.Add(Setting("浏览器设置提醒",browser,"不用填文件路径。点右边选 Chrome 右上角头像对应的名称，也可以跳过。\r\n选好后，保存的语言或相关策略变了会提醒；想配置浏览器，请看上面的操作方法。",UI.Button("选 Chrome",(s,e)=>ChooseChrome())));
+            advanced.Controls.Add(Setting("额外检查 v2rayN",v2ray,"只有用 v2rayN、还想盯它保存的节点和路由设置时才选这个文件。\r\n用其他代理软件就跳过；上面的端口和出口检查照常使用。",UI.Button("选择文件",(s,e)=>ChooseConfig(v2ray,false))));
             advanced.Controls.Add(Setting("更新来源",repository,"已填本项目的账号/仓库，通常不用改。只用于手动“检查更新”；清空也能监测。",null));
             more.CheckedChanged+=(s,e)=>{advanced.Visible=more.Checked;more.Text=more.Checked?"更多检查（可选，点这里收起）":"更多检查（可选，点这里展开）";};
             environment.Controls.Add(content);
@@ -143,9 +145,9 @@ namespace EnvGuard
         void ChooseChrome()
         {
             try{var choices=ChromeChoices(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Google","Chrome","User Data"));
-                using(var picker=new Form()){UI.Base(picker,"选择实际使用的 Chrome 用户",780,380);picker.Padding=new Padding(20);var list=new ListBox{Dock=DockStyle.Fill,DisplayMember="Name"};foreach(var choice in choices)list.Items.Add(choice.Name);if(list.Items.Count>0)list.SelectedIndex=0;
-                    var buttons=UI.Buttons();buttons.Controls.Add(UI.Button("确认选择",(s,e)=>{if(list.SelectedIndex>=0){browser.Text=choices[list.SelectedIndex].Path;picker.Close();}}));buttons.Controls.Add(UI.Button("手动选文件",(s,e)=>{ChooseConfig(browser,true);if(!String.IsNullOrWhiteSpace(browser.Text))picker.Close();}));buttons.Controls.Add(UI.Button("取消",(s,e)=>picker.Close()));
-                    var hint=UI.Label(choices.Count>0?"选你登录 Claude 时用的那个 Chrome 用户；不会启动或改动 Chrome。\r\n路径只是保存的设置文件。如果用便携版或自定义目录，点“手动选文件”。":"没找到标准目录里的 Chrome 用户。\r\n可在 Chrome 打开 chrome://version，按 Profile Path 手动选择其中的 Preferences。",70);picker.Controls.Add(list);picker.Controls.Add(hint);picker.Controls.Add(buttons);picker.ShowDialog(this);
+                using(var picker=new Form()){UI.Base(picker,"选你用来登录的 Chrome",780,380);picker.Padding=new Padding(20);var list=new ListBox{Dock=DockStyle.Fill,DisplayMember="Name"};foreach(var choice in choices)list.Items.Add(choice.Name);if(list.Items.Count>0)list.SelectedIndex=0;
+                    var buttons=UI.Buttons();buttons.Controls.Add(UI.Button("确认选择",(s,e)=>{if(list.SelectedIndex>=0){browser.Text=choices[list.SelectedIndex].Path;picker.Close();}}));buttons.Controls.Add(UI.Button("跳过此项",(s,e)=>{browser.Text="";picker.Close();}));buttons.Controls.Add(UI.Button("手动选文件",(s,e)=>{ChooseConfig(browser,true);if(!String.IsNullOrWhiteSpace(browser.Text))picker.Close();}));buttons.Controls.Add(UI.Button("取消",(s,e)=>picker.Close()));
+                    var hint=UI.Label(choices.Count>0?"打开 Chrome，点右上角头像，看名字；在下面选同一个名字。\r\nEnvGuard 只读取保存的设置，不会改 Chrome。不确定可以点“跳过此项”。":"没找到 Chrome 的资料。你可以先跳过，不影响代理和出口检查。\r\n便携版可手动选择：在 Chrome 打开 chrome://version，找到 Profile Path，在那个文件夹选 Preferences。",70);picker.Controls.Add(list);picker.Controls.Add(hint);picker.Controls.Add(buttons);picker.ShowDialog(this);
                 }
             }catch(Exception ex){UI.Error("无法列出 Chrome 用户："+ex.Message+"。可以先跳过这一项。");}
         }
@@ -162,7 +164,7 @@ namespace EnvGuard
         }
         Profile Input()
         {
-            errors.Clear();invalid=null;int n;if(!Int32.TryParse(port.Text,out n) || n<1 || n>65535){invalid=port;tabs.SelectedIndex=1;errors.SetError(port,"填 v2rayN 左下角 mixed 后的数字（1—65535）。");throw new InvalidOperationException("代理端口不正确。请看输入框旁的“去哪找？”。");}if(apps.Items.Count==0){tabs.SelectedIndex=0;throw new InvalidOperationException("先选择需要保护的软件。");}
+            errors.Clear();invalid=null;int n;if(!Int32.TryParse(port.Text,out n) || n<1 || n>65535){invalid=port;tabs.SelectedIndex=1;errors.SetError(port,"填代理软件的 HTTP 或混合端口数字（1—65535）。");throw new InvalidOperationException("还没有填正确的代理端口。点输入框旁的“去哪找？”看步骤。");}if(apps.Items.Count==0){tabs.SelectedIndex=0;throw new InvalidOperationException("先选择需要保护的软件。");}
             IPAddress ip;if(!String.IsNullOrWhiteSpace(expected.Text)&&!IPAddress.TryParse(expected.Text.Trim(),out ip)){more.Checked=true;tabs.SelectedIndex=1;invalid=expected;errors.SetError(expected,"这里填 IP 地址，不填网址；不确定可以留空。");throw new InvalidOperationException("指定出口 IP 格式不正确；不知道目标 IP 可以留空。");}
             string file=Path.GetFullPath(logFile.Text);if(!file.EndsWith(".jsonl",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("日志文件需要 .jsonl 扩展名。");
             return new Profile{ProxyPort=n,ExitIp=expected.Text.Trim(),LogFile=file,Apps=apps.Items.Cast<AppTarget>().ToList(),BrowserPreferences=browser.Text.Trim(),V2rayConfig=v2ray.Text.Trim(),GitHubRepository=repository.Text.Trim()};
@@ -191,8 +193,9 @@ namespace EnvGuard
         }
         public void PreviewPage(int page,Profile p){review.Text=Describe(p);tabs.SelectedIndex=page;}
         public void PreviewAdvanced(bool value){more.Checked=value;}
+        public void PreviewAdvancedBottom(){((TabPage)tabs.TabPages[1]).AutoScrollPosition=new Point(0,10000);}
         public bool AdvancedShown {get{return more.Checked;}}
-        public bool FieldsAligned {get{return port.Left==logFile.Left&&port.Width==logFile.Width&&browser.Width==v2ray.Width&&port.Height==logFile.Height;}}
+        public bool FieldsAligned {get{return port.Left==logFile.Left&&port.Width==logFile.Width&&browser.Width==v2ray.Width&&port.Height==logFile.Height&&(!more.Checked||(port.Width==expected.Width&&expected.Width==browser.Width&&port.PointToScreen(Point.Empty).X==browser.PointToScreen(Point.Empty).X));}}
         protected override void Dispose(bool disposing){if(disposing)errors.Dispose();base.Dispose(disposing);}
     }
     public sealed class AlertForm : Form

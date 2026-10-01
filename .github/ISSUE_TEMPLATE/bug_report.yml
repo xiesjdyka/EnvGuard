@@ -1,0 +1,37 @@
+name: 遇到问题
+description: 程序不正常、提醒不对，或者某一步做不下去
+title: "[问题] "
+body:
+  - type: markdown
+    attributes:
+      value: "感谢帮忙改进！截图和日志请先遮掉真实 IP、用户名、节点链接、密码及登录信息。安全漏洞请按 SECURITY.md 私下报告。"
+  - type: input
+    id: version
+    attributes:
+      label: 你用的是哪个版本？
+      placeholder: 例如 1.2.2；不知道可以写“不知道”
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 发生了什么？
+      description: 你原本想做什么，实际看到什么？可以拖入截图。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么操作会出现？
+      placeholder: 打开程序 → 点了哪个按钮 → 出现什么
+  - type: textarea
+    id: environment
+    attributes:
+      label: 使用环境（可选）
+      description: Windows 版本、代理软件名称、HTTP 或混合端口模式即可，不需要节点账号和地址。
+  - type: textarea
+    id: log
+    attributes:
+      label: 相关记录（可选）
+      description: 只贴相关的几行，先遮掉私人信息；没有日志也可以提交。
+      render: text

@@ -1,5 +1,6 @@
 param(
     [ValidateSet('Inspect','Apply','Restore','SelfTest')][string]$Mode='Inspect',
+    [ValidateSet('Basic','Full')][string]$Preset='Full',
     [ValidateRange(1,65535)][int]$ProxyPort=10808,
     [switch]$ConfirmAllChromeProfiles,
     [string]$LogFile
@@ -10,6 +11,12 @@ if($env:OS -ne 'Windows_NT'){throw '此脚本只支持 Windows，推荐 PowerShe
 $policyPath='Software\Policies\Google\Chrome'
 $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $stateFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\chrome-policy-state.json'
+$otherStateFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\chrome-policy-basic-state.json'
+if($Preset -eq 'Basic'){
+    if($PSBoundParameters.ContainsKey('ProxyPort')){throw 'Basic 只调整昨天的两项设置，不设置代理端口；请去掉 -ProxyPort。'}
+    $stateFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\chrome-policy-basic-state.json'
+    $otherStateFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\chrome-policy-state.json'
+}
 $rules=@(
     [pscustomobject]@{Name='ProxySettings';Kind='String';Value=(@{ProxyMode='fixed_servers';ProxyServer="http://127.0.0.1:$ProxyPort";ProxyBypassList='<-loopback>;localhost;*.localhost;127.0.0.0/8;[::1]'} | ConvertTo-Json -Compress)},
     [pscustomobject]@{Name='WebRtcIPHandling';Kind='String';Value='disable_non_proxied_udp'},
@@ -18,6 +25,7 @@ $rules=@(
     [pscustomobject]@{Name='BackgroundModeEnabled';Kind='DWord';Value=0},
     [pscustomobject]@{Name='SyncDisabled';Kind='DWord';Value=1}
 )
+if($Preset -eq 'Basic'){$rules=@($rules | Where-Object Name -in @('WebRtcIPHandling','NetworkPredictionOptions'))}
 function Read-Policies([string]$Path,[Microsoft.Win32.RegistryHive]$Hive=[Microsoft.Win32.RegistryHive]::CurrentUser){
     $root=[Microsoft.Win32.RegistryKey]::OpenBaseKey($Hive,[Microsoft.Win32.RegistryView]::Registry64)
     $key=$root.OpenSubKey($Path)
@@ -34,8 +42,11 @@ function Write-Policies([string]$Path,[object[]]$Rows){
     try{foreach($row in $Rows){if($row.Name -notin $rules.Name){throw '未知策略名，拒绝写入'};if($row.Exists){$kind=[Microsoft.Win32.RegistryValueKind]([Enum]::Parse([Microsoft.Win32.RegistryValueKind],$row.Kind));$value=if($kind -eq [Microsoft.Win32.RegistryValueKind]::DWord){[int]$row.Value}else{[string]$row.Value};$key.SetValue($row.Name,$value,$kind)}else{$key.DeleteValue($row.Name,$false)}};$key.Flush()}finally{$key.Dispose();$root.Dispose()}
 }
 function Same-Policy($Left,$Right){return $Left.Name -eq $Right.Name -and $Left.Exists -eq $Right.Exists -and (-not $Left.Exists -or ($Left.Kind -eq $Right.Kind -and [string]$Left.Value -ceq [string]$Right.Value))}
+function Assert-NoOtherPreset([string]$Path){if(Test-Path -LiteralPath $Path){throw '已经应用过另一套 Chrome 设置。先用原来的 Basic 或 Full 命令恢复，再切换；不会交叉覆盖恢复记录。'}}
 function Validate-State($State){
     if($State.Schema -ne 1 -or $State.Sid -ne $sid -or $State.Computer -ne $env:COMPUTERNAME -or $State.RegistryPath -ne $policyPath){throw '还原记录不属于当前设备/用户，拒绝使用'}
+    if($Preset -eq 'Basic' -and (-not $State.PSObject.Properties['Preset'] -or $State.Preset -ne 'Basic')){throw '还原记录不是 Basic 两项设置，拒绝使用'}
+    if($Preset -eq 'Full' -and $State.PSObject.Properties['Preset'] -and $State.Preset -ne 'Full'){throw '还原记录不是 Full 六项设置，拒绝使用'}
     foreach($rows in @($State.Previous,$State.Applied)){if($rows.Count -ne $rules.Count -or (@($rows.Name | Sort-Object -Unique).Count -ne $rules.Count)){throw '还原记录不完整'};foreach($row in $rows){if($row.Name -notin $rules.Name -or $row.Kind -notin @('String','DWord') -or $row.Exists -isnot [bool]){throw '还原记录格式异常'}}}
     for($i=0;$i -lt $rules.Count;$i++){if($State.Previous[$i].Name -ne $rules[$i].Name -or $State.Applied[$i].Name -ne $rules[$i].Name){throw '还原记录顺序异常'}}
 }
@@ -57,11 +68,15 @@ function Audit-Change([string]$Event,$Data){
 if($Mode -eq 'SelfTest'){
     # Isolated test namespace only: no writes to real Chrome policy or EnvGuard profile.
     $testPath='Software\EnvGuard\SelfTest\'+[guid]::NewGuid().ToString('N')
-    try{$before=@(Read-Policies $testPath);$applied=@($rules | ForEach-Object {[pscustomobject]@{Name=$_.Name;Exists=$true;Kind=$_.Kind;Value=$_.Value}});Write-Policies $testPath $applied;$after=@(Read-Policies $testPath)
+    try{
+        if($Preset -eq 'Basic'){$testKey=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($testPath);try{$testKey.SetValue('ProxySettings','unchanged-test-value',[Microsoft.Win32.RegistryValueKind]::String);$testKey.SetValue('QuicAllowed',1,[Microsoft.Win32.RegistryValueKind]::DWord)}finally{$testKey.Dispose()}}
+        $before=@(Read-Policies $testPath);$applied=@($rules | ForEach-Object {[pscustomobject]@{Name=$_.Name;Exists=$true;Kind=$_.Kind;Value=$_.Value}});Write-Policies $testPath $applied;$after=@(Read-Policies $testPath)
         for($i=0;$i -lt $rules.Count;$i++){if(-not (Same-Policy $after[$i] $applied[$i])){throw '测试失败：策略写入/读取'}}
-        $proxy=$after[0].Value | ConvertFrom-Json;if($proxy.ProxyMode -ne 'fixed_servers' -or $proxy.ProxyServer -match 'direct' -or $proxy.ProxyBypassList -ne '<-loopback>;localhost;*.localhost;127.0.0.0/8;[::1]'){throw '测试失败：代理约束'}
+        if($Preset -eq 'Full'){$proxy=$after[0].Value | ConvertFrom-Json;if($proxy.ProxyMode -ne 'fixed_servers' -or $proxy.ProxyServer -match 'direct' -or $proxy.ProxyBypassList -ne '<-loopback>;localhost;*.localhost;127.0.0.0/8;[::1]'){throw '测试失败：代理约束'}}
+        else{$testKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testPath);try{if($testKey.GetValue('ProxySettings') -ne 'unchanged-test-value' -or $testKey.GetValue('QuicAllowed') -ne 1){throw '测试失败：两项模式修改了其他策略'}}finally{$testKey.Dispose()}}
         Write-Policies $testPath $before;$restored=@(Read-Policies $testPath);if(@($restored | Where-Object Exists).Count -ne 0){throw '测试失败：策略还原'}
-        Write-Output 'PASS: Chrome helper isolated registry roundtrip / loopback-only bypass / restore (8 checks); real Chrome unchanged'
+        if($Preset -eq 'Basic'){$testKey=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($testPath);try{if($testKey.GetValue('ProxySettings') -ne 'unchanged-test-value' -or $testKey.GetValue('QuicAllowed') -ne 1){throw '测试失败：两项恢复修改了其他策略'}}finally{$testKey.Dispose()};Write-Output 'PASS: Chrome Basic isolated two-policy roundtrip / other policies unchanged / restore (5 checks); real Chrome unchanged'}
+        else{Write-Output 'PASS: Chrome Full isolated registry roundtrip / loopback-only bypass / restore (8 checks); real Chrome unchanged'}
     }finally{if($testPath -notmatch '^Software\\EnvGuard\\SelfTest\\[a-f0-9]{32}$'){throw '测试清理路径不安全'};[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($testPath,$false)}
     return
 }
@@ -77,6 +92,7 @@ if($Mode -eq 'Inspect'){
     return
 }
 if(-not $ConfirmAllChromeProfiles){throw '操作会影响当前用户所有 Chrome 配置文件。确认了解影响后增加 -ConfirmAllChromeProfiles。'}
+Assert-NoOtherPreset $otherStateFile
 if([string]::IsNullOrWhiteSpace($LogFile)){
     $profileFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\profiles\default.json'
     if(Test-Path -LiteralPath $profileFile){$profile=Get-Content -LiteralPath $profileFile -Raw | ConvertFrom-Json;if($profile.UserSid -ne $sid -or $profile.Computer -ne $env:COMPUTERNAME){throw '本地配置来自其他设备/用户'};$LogFile=[string]$profile.LogFile}else{$LogFile=Join-Path $env:LOCALAPPDATA 'EnvGuard\logs\events.jsonl'}
@@ -91,21 +107,21 @@ if($Mode -eq 'Restore'){
     $verified=@(Read-Policies $policyPath);for($i=0;$i -lt $rules.Count;$i++){if(-not (Same-Policy $verified[$i] $state.Previous[$i])){throw '恢复后校验未通过，请 Inspect 核对；保留恢复记录'}}
     Audit-Change 'chrome_policy_restored' @{names=$rules.Name}
     Move-Item -LiteralPath $stateFile -Destination ($stateFile+'.restored-'+[guid]::NewGuid().ToString('N'))
-    Write-Output '已恢复本工具修改前的六项当前用户策略；未改动其他策略。请重启 Chrome，再重新核对 EnvGuard 基准。'
+    Write-Output ("已恢复 $Preset 设置修改前的 $($rules.Count) 项值；未改动其他策略。请重启 Chrome，再重新核对 EnvGuard 基准。")
     return
 }
 if(@($machine | Where-Object Exists).Count -gt 0){throw '存在相关机器级策略，拒绝悄悄覆盖；请在 chrome://policy 检查优先级或联系设备管理员'}
 foreach($hive in @([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryHive]::LocalMachine)){
     $root=[Microsoft.Win32.RegistryKey]::OpenBaseKey($hive,[Microsoft.Win32.RegistryView]::Registry64);$key=$root.OpenSubKey($policyPath)
-    try{if($key){foreach($name in @('WebRtcIPHandlingUrl','ProxyOverrideRules')){if($key.GetValueNames() -contains $name -or $key.GetSubKeyNames() -contains $name){throw ('存在单独的网址覆盖策略，无法保证六项策略效果，请先核对：'+$name)}};if($hive -eq [Microsoft.Win32.RegistryHive]::LocalMachine){foreach($name in @('ProxyMode','ProxyServer','ProxyBypassList','ProxyPacUrl')){if($key.GetValueNames() -contains $name){throw ('存在机器级代理策略，拒绝悄悄覆盖：'+$name)}}};if($key.GetValue('RoamingProfileSupportEnabled',0) -eq 1){throw '漫游配置支持已启用，与强制关闭同步策略有冲突，拒绝修改'};foreach($rule in $rules){if($key.GetSubKeyNames() -contains $rule.Name){throw ('现有策略使用子键格式，拒绝覆盖：'+$rule.Name)}}}}finally{if($key){$key.Dispose()};$root.Dispose()}
+    try{if($key){$overrides=if($Preset -eq 'Basic'){@('WebRtcIPHandlingUrl')}else{@('WebRtcIPHandlingUrl','ProxyOverrideRules')};foreach($name in $overrides){if($key.GetValueNames() -contains $name -or $key.GetSubKeyNames() -contains $name){throw ('存在单独的网址覆盖策略，请先核对：'+$name)}};if($Preset -eq 'Full'){if($hive -eq [Microsoft.Win32.RegistryHive]::LocalMachine){foreach($name in @('ProxyMode','ProxyServer','ProxyBypassList','ProxyPacUrl')){if($key.GetValueNames() -contains $name){throw ('存在机器级代理策略，拒绝悄悄覆盖：'+$name)}}};if($key.GetValue('RoamingProfileSupportEnabled',0) -eq 1){throw '漫游配置支持已启用，与强制关闭同步策略有冲突，拒绝修改'}};foreach($rule in $rules){if($key.GetSubKeyNames() -contains $rule.Name){throw ('现有策略使用子键格式，拒绝覆盖：'+$rule.Name)}}}}finally{if($key){$key.Dispose()};$root.Dispose()}
 }
 if($state){for($i=0;$i -lt $rules.Count;$i++){if(-not (Same-Policy $current[$i] $state.Applied[$i])){throw '当前策略与上次应用不同；先 Inspect 核对，不覆盖第三方改动'}}}
 $applied=@($rules | ForEach-Object {[pscustomobject]@{Name=$_.Name;Exists=$true;Kind=$_.Kind;Value=$_.Value}})
 $previous=if($state){@($state.Previous)}else{$current}
-$newState=@{Schema=1;Sid=$sid;Computer=$env:COMPUTERNAME;RegistryPath=$policyPath;Previous=$previous;Applied=$applied}
-Audit-Change 'chrome_policy_apply_requested' @{names=$rules.Name;proxyPort=$ProxyPort}
+$newState=@{Schema=1;Preset=$Preset;Sid=$sid;Computer=$env:COMPUTERNAME;RegistryPath=$policyPath;Previous=$previous;Applied=$applied}
+Audit-Change 'chrome_policy_apply_requested' @{names=$rules.Name;preset=$Preset}
 Save-State $newState
 try{Write-Policies $policyPath $applied;$verified=@(Read-Policies $policyPath);for($i=0;$i -lt $rules.Count;$i++){if(-not (Same-Policy $verified[$i] $applied[$i])){throw '策略写入后校验失败'}}}catch{try{Write-Policies $policyPath $current;if($state){Save-State $state};Audit-Change 'chrome_policy_apply_failed' @{error=$_.Exception.Message;rollback='previous attempt values restored'}}catch{Write-Warning '自动回滚未完全确认，请 Inspect 并查看还原记录'};throw}
-Audit-Change 'chrome_policy_applied' @{names=$rules.Name;proxyPort=$ProxyPort}
-Write-Output '六项策略已写入当前用户。请完整退出并重启 Chrome，在 chrome://policy 检查实际状态，再确认出口并保存 EnvGuard 基准。注册表写入成功不等于 Chrome 已生效。'
+Audit-Change 'chrome_policy_applied' @{names=$rules.Name;preset=$Preset}
+Write-Output ("$Preset 的 $($rules.Count) 项设置已写入。请完整退出并重启 Chrome，在 chrome://policy 检查状态是否正常，再核对出口。")
 }finally{$scriptMutex.ReleaseMutex();$scriptMutex.Dispose()}

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 聊用法、提想法
+    url: https://github.com/xiesjdyka/EnvGuard/discussions
+    about: 不会写代码也欢迎，大家可以在这里讨论和回复。
+  - name: 我想参与完善
+    url: https://github.com/xiesjdyka/EnvGuard/blob/main/CONTRIBUTING.md
+    about: 修改代码、文案或帮助测试，先看这份简单说明。

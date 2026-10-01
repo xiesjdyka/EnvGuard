@@ -16,20 +16,20 @@
 
 ## 2. 可选：应用浏览器网络/隐私策略
 
-包内的 `ChromePrivacy.ps1` **默认仅检查，绝不自动修改**。只有你执行 `Apply` 并明确确认作用范围，才应用六项策略。
+包内的 `ChromePrivacy.ps1` **默认仅检查，绝不自动修改**。下面讲的是完整六项模式（Full）；只想参考昨天的两项设置，用 [简单操作里的 Basic 模式](CHROME-PRIVACY.md)。执行 `Apply` 并明确确认作用范围后才修改。两种模式不能同时应用，切换前须先恢复当前模式。
 
 **重要：当前用户注册表策略会影响该 Windows 用户的所有 Chrome 配置，不只专用窗口。**不适合与需要直连、同步、视频通话的日常 Chrome 混用。浏览器设置和手机/其他用户不在此脚本覆盖范围。
 
 在解压后的文件夹打开 PowerShell 7。先检查：
 
 ```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Inspect
+pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Inspect -Preset Full
 ```
 
 先确保本机代理已正常运行，确认 HTTP/mixed 端口，再应用。例如本机端口 `10808`：
 
 ```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -ProxyPort 10808 -ConfirmAllChromeProfiles
+pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -Preset Full -ProxyPort 10808 -ConfirmAllChromeProfiles
 ```
 
 端口要填本机软件的 HTTP/mixed 监听端口，**不是卖家给的远程节点端口**。若权限被拒绝，使用同一 Windows 账号以管理员方式打开 PowerShell 7，重新检查；不要修改注册表权限或改用另一账号猜测操作。
@@ -82,7 +82,7 @@ pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -ProxyPort 10808 -ConfirmA
 脚本只为自己管理的六项保存恢复记录，不备份浏览历史、密码或整个浏览器。记录放在 `%LOCALAPPDATA%\EnvGuard\chrome-policy-state.json`，**不要公开上传**。重复应用不会丢掉第一次的原值；遇到其他操作改了策略会拒绝覆盖。
 
 ```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -ConfirmAllChromeProfiles
+pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -Preset Full -ConfirmAllChromeProfiles
 ```
 
 恢复你应用前的六项值，不删除其他策略。恢复后重启 Chrome；原代理路径可能是系统代理或直连，所以先暂停敏感网页操作，再重新确认环境。不会改系统网络，其他软件恢复正常网络由你自己控制。

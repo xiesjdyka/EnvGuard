@@ -1,107 +1,66 @@
-# 当时 Chrome 是怎么弄的？可以参考这条思路
+# Chrome 准备：执行代码 → 看结果 → 改语言
 
-使用 Claude 桌面版时，登录可能跳到浏览器；工作中也可能用浏览器打开网页。所以除了软件本身，也要看看浏览器有没有多余的连接或不必要的权限。
+这就是当时的操作流程，作为独立参考放在这里。先连好代理；已经设置好、检查也正常的步骤不用重复做。EnvGuard 不会自动帮你执行这些操作。
 
-**这是一份独立的参考方法，不是要给 EnvGuard 再加浏览器功能。** 可以按自己的需要选用。目标是减少意外暴露，不是让网站完全不知道你是谁，也不保证账号不被限制。
+## 第一步：执行代码
 
-## 当时先做了什么？
+下载并解压 [EnvGuard 程序包](https://github.com/xiesjdyka/EnvGuard/releases/latest/download/EnvGuard-windows-x64.zip)。进入解压后的文件夹，在空白处右键，选 **在终端中打开**。
 
-先把 Chrome 设为默认浏览器，然后处理两项网络设置：
+复制下面这一整行，粘贴到终端，按回车：
 
-- **限制 WebRTC 不经过代理的 UDP 连接。** WebRTC 常用于语音、视频等实时通信，它不一定和普通网页走完全一样的连接方式。
-- **关闭提前加载和连接预测。** 不让 Chrome 为了“打开更快”，提前解析或连接你还没打开的内容。
+```powershell
+pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -Preset Basic -ConfirmAllChromeProfiles
+```
 
-当时在 `chrome://policy` 里看到这两项状态是“正常”，才确认 Chrome 已识别设置：
+它会执行包内代码，设置当时那两项：限制 WebRTC 不经过代理的 UDP 连接、关闭提前加载。**影响当前 Windows 用户的所有 Chrome 窗口**，语音、视频功能可能受影响；代理软件、语言和时区不会被这行代码修改。
 
-| 名字，不用背，核对时找它 | 当时的值 |
+看到“2 项设置已写入”后，继续下一步。若报“拒绝访问”，用同一个账号以管理员身份打开 PowerShell 7，进入这个解压文件夹再执行；找不到 `pwsh`，说明需要先 [安装 PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows)。其他报错先停下看原因，不要关闭安全软件强行运行。
+
+## 第二步：在 Chrome 看有没有生效
+
+1. 保存浏览器里的工作，退出所有 Chrome 窗口，再重新打开。
+2. 地址栏输入 `chrome://policy`，按回车。
+3. 点 **Reload policies / 重新加载政策**。
+4. 找下面两项，值应当一致，状态应当是 **OK / 正常**。
+
+| 政策名 | 应当显示的值 |
 | --- | --- |
 | `WebRtcIPHandling` | `disable_non_proxied_udp` |
 | `NetworkPredictionOptions` | `2` |
 
-这两项的作用可以查 [Chrome 的 WebRTC 定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/WebRtc/WebRtcIPHandling.yaml) 和 [提前加载定义](https://github.com/chromium/chromium/blob/main/components/policy/resources/templates/policy_definitions/Miscellaneous/NetworkPredictionOptions.yaml)。
+两项都正常，这一步就好了。Chrome 出现“由组织管理”，可以在这个页面看具体是哪几项政策。
 
-后面还核对了语言、时区等设置。但这些只是浏览器显示和工作环境的设置，**改成英文、换字体，不会让网络自动更安全**。尤其“默认字体改成 Arial”和“网站检测不到中文字体”是两回事。不要为了把第三方检测分数刷到零，反复装各种改指纹扩展。
+如果没出现，或状态报错，先别继续登录，保留截图排查。这里是在确认两项设置生效，不是账号安全评分。
 
-## 想参考的话，先照这个顺序来
+## 第三步：改首选语言
 
-1. **先连好代理，再检查出口。** 在准备使用的 Chrome 窗口查一下公网 IP，确认是你想用的出口。代理连上不代表出口一定正确。
-2. **尽量用一个工作专用的 Chrome 配置。** 点右上角头像新建配置，少装扩展，不导入不需要的密码和历史。它能分开这些浏览数据，但不等于网络隔离。设了默认浏览器后，也要看登录页实际打开的是不是这个配置。
-3. **设置后，要去浏览器里确认。** 写入设置成功，不等于 Chrome 已经用上了。下面会说怎么看。
-4. **最后再保存 EnvGuard 的设置。** 不要先把错误出口或没生效的设置记成正常。每次登录前先开 EnvGuard 看当前结果。
+如果这个 Chrome 想主要用英文：
 
-## 有代码吗？有，作为可选方案附在这里
+1. 地址栏输入 `chrome://settings/languages`，按回车。
+2. 在 **Preferred languages / 首选语言** 里添加 **English (United States)**。
+3. 点英文右侧的三个点，选 **Move to the top / 移到顶部**。
+4. 想让菜单也变英文，就勾 **Display Google Chrome in this language / 以这种语言显示 Google Chrome**，再点 **Relaunch / 重新启动**。
+5. 不再需要的 Chinese 条目，点右侧三个点 → **Remove / 移除**。还要用中文就保留。
 
-包里的 [ChromePrivacy.ps1](ChromePrivacy.ps1) 可以直接修改相关设置，也支持恢复。**它比当时最初的两项设置多：还会固定 Chrome 代理、关闭 QUIC、关窗后台模式和浏览器同步。不是当时两项代码的原样复刻。** 完整规则见 [详细说明](CHROME-DETAILS.md)。
+**菜单变英文，不等于首选语言里已经没有中文。** 当时“改了还是显示中文”，就是列表里还有中文条目。改好后重开 Chrome，再刷新你看的检测页面。按钮名称可以对照 [Google 的语言设置说明](https://support.google.com/chrome/answer/173424?co=GENIE.Platform%3DDesktop&hl=zh-Hans)。
 
-执行前先看清影响：
+到这里就是完整流程了。字体、Emoji 那两项不用继续折腾：改默认字体不会隐藏系统字体，Microsoft style 也不是 IP 泄露提示。语言按自己的需要选，第三方分数不是 Claude 的账号安全判定。
 
-- 它会影响**当前 Windows 用户的全部 Chrome 配置**，不只是工作窗口。如果日常 Chrome 还要直连或同步，不要直接照搬。
-- Chrome 会固定使用你填的本机代理；代理不可用时，普通网页请求可能打不开。
-- 语音、视频等功能可能受影响；Chrome 的 Google 浏览器同步会被关闭。关闭同步不是禁止登录网站。
-- 它不修改系统代理，不替你调整 v2rayN 路由，也不自动关浏览器。
+<details>
+<summary>以后想恢复代码改过的两项，点这里</summary>
 
-### 怎么执行？
-
-先从 [发布页](https://github.com/xiesjdyka/EnvGuard/releases/latest) 下载 ZIP 并解压。只看 GitHub 网页是不够的，脚本要在电脑上运行。
-
-打开解压后的文件夹，在文件夹空白处右键，选择“在终端中打开”。使用 PowerShell 7；下面的命令一次复制一行，粘贴后按回车。
-
-**先看看现有设置，不会修改：**
+在同一个解压文件夹打开终端，执行：
 
 ```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Inspect
+pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -Preset Basic -ConfirmAllChromeProfiles
 ```
 
-**确认了解上面的影响后，再应用：** 假设 v2rayN 底部显示的本机 `mixed` 端口是 `10808`：
+然后重开 Chrome，到 `chrome://policy` 核对。恢复的是**本次执行代码前**的两项值，不会撤销你用其他代码改过的旧设置，也不会恢复语言。
 
-```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Apply -ProxyPort 10808 -ConfirmAllChromeProfiles
-```
+脚本的应用和恢复操作会留记录：已配置 EnvGuard 时，写到你选的日志；否则在 `%LOCALAPPDATA%\EnvGuard\logs\events.jsonl`。不要把含私人信息的日志公开上传。
 
-如果你显示的是别的本机端口，就只把 `10808` 换成自己的。**不是卖家给你的远程节点端口。**
+</details>
 
-如果提示找不到 `pwsh`，说明当前终端没有找到 PowerShell 7，请先确认它已安装。如果提示找不到脚本，说明终端没在解压后的文件夹里。若提示“拒绝访问”，用同一个 Windows 账号以管理员身份打开 PowerShell 7，再进入这个文件夹操作。
+想了解原理或其他可选设置，另看 [详细说明](CHROME-DETAILS.md)。这里只保留上面三步。
 
-如果提示组织策略冲突或脚本被安全策略阻止，先停止操作，检查原因；不要删除组织策略、修改注册表权限或关闭安全防护来强行运行。
-
-### 怎么看有没有生效？
-
-1. 先保存浏览器里正在做的事，完整退出 Chrome，再重新打开。必要时确认后台也已退出；脚本不会帮你杀掉浏览器。
-2. 在 Chrome 地址栏输入 `chrome://policy`，按回车，点“重新加载政策”。
-3. 最初那两项应是上表的值。使用完整脚本后还应有 `ProxySettings`、`QuicAllowed`、`BackgroundModeEnabled` 和 `SyncDisabled`，这六项的状态都应正常。
-4. 展开 `ProxySettings`，确认代理地址是 `http://127.0.0.1:你的本机端口`，模式是 `fixed_servers`。详细核对值见 [六项设置表](CHROME-DETAILS.md#2-可选应用浏览器网络隐私策略)。
-5. 再在这个 Chrome 窗口查公网 IP，和 EnvGuard 检测到的出口对照。
-
-没有出现、出现错误或出口不对，先不要继续登录。单次查 IP 通过，也不代表所有连接都验证过了。
-
-`localhost` / `127.0.0.1` 这些本机地址是有意保留的，桌面软件登录回调可能需要它们，不是把登录官网放行直连。别自行加公网网站绕过项。
-
-### 不想用了，怎么恢复？
-
-先暂停敏感页面操作，在同一个文件夹执行：
-
-```powershell
-pwsh -NoProfile -File .\ChromePrivacy.ps1 -Mode Restore -ConfirmAllChromeProfiles
-```
-
-它恢复的是**本脚本应用前保存的六项设置**，不是把所有 Chrome 设置清空，也不能撤销你以前用别的方法做过的修改。恢复后重开 Chrome，再查实际出口；原设置可能允许直连。
-
-应用和恢复也会留日志：已有 EnvGuard 配置时使用你选的日志文件，否则默认写到 `%LOCALAPPDATA%\EnvGuard\logs\events.jsonl`。不要把本机的恢复记录和日志上传到公开仓库。
-
-## 登录或让软件使用浏览器时，再注意这几件事
-
-- 确认确实是官方网站，HTTPS 没有证书错误。不要把密码、验证码或登录回调链接交给第三方检测网站。
-- 定位、摄像头、麦克风、通知等权限，不需要就拒绝，不要一口气全允许。
-- 少装扩展，特别是能读取所有网页的扩展。改指纹扩展不是通用的防泄露办法。
-- Chrome 和系统保持更新，不关闭安全浏览、沙箱或证书校验。
-- 出口或设置异常时，先暂停操作。如果要连浏览器一起紧急关闭，必须把 Chrome 另外加入 EnvGuard 的保护软件；这可能关掉同一安装下的全部 Chrome 窗口。
-
-## 它能防什么，不能防什么？
-
-这条思路主要减少 Chrome 的额外连接和不必要的数据暴露。完整脚本给 Chrome 指定代理，但**代理软件自己仍可能按路由直连**；Claude 自身、其他软件、扩展调用的外部程序也不因此被隔离。[Chrome 官方代理说明](https://github.com/chromium/chromium/blob/main/net/docs/proxy.md)
-
-登录的网站仍会知道你的账号和本次连接的出口。EnvGuard 的提醒也有检测时间，不是掉线瞬间就能拦住每个请求。
-
-所以重点不是“把检测网站变成全绿”，而是：**知道连接怎么走，确认设置真的生效，少给不必要的权限，异常时停止操作。** 遵守所用服务的使用规则，不把这套方法当作冒充所在地或账号安全的保证。
-
-[回到 EnvGuard 首页](README.md) · [查看完整 Chrome 技术说明](CHROME-DETAILS.md)
+[回到 EnvGuard 使用说明](README.md)
