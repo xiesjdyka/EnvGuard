@@ -39,15 +39,26 @@ namespace EnvGuard
         readonly HashCache hashes=new HashCache();
         public EnvironmentChecker(Profile p){profile=p;}
         public static string Sid(){using(var i=WindowsIdentity.GetCurrent())return i.User.Value;}
-        static string Value(RegistryHive hive,string path,string name)
+        internal static string Value(RegistryHive hive,string path,string name)
         {
             using(var root=RegistryKey.OpenBaseKey(hive,RegistryView.Registry64))using(var k=root.OpenSubKey(path)){
-                if(k==null || !k.GetValueNames().Contains(name,StringComparer.OrdinalIgnoreCase))return "<未设置>";
+                if(k==null)return "<未设置>";
+                if(!k.GetValueNames().Contains(name,StringComparer.OrdinalIgnoreCase)){
+                    if(!k.GetSubKeyNames().Contains(name,StringComparer.OrdinalIgnoreCase))return "<未设置>";
+                    using(var sub=k.OpenSubKey(name)){string tree=new JavaScriptSerializer().Serialize(RegistryTree(sub,0));if(tree.Length>65536)throw new InvalidDataException("策略子键过大。");return "子键:"+tree;}
+                }
                 object v=k.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames);
                 if(v is byte[])return k.GetValueKind(name)+":"+Convert.ToBase64String((byte[])v);
                 if(v is string[])return k.GetValueKind(name)+":"+String.Join(",",(string[])v);
                 return k.GetValueKind(name)+":"+Convert.ToString(v,CultureInfo.InvariantCulture);
             }
+        }
+        static SortedDictionary<string,object> RegistryTree(RegistryKey key,int depth)
+        {
+            if(key==null || depth>3)throw new InvalidDataException("策略子键不可读取或过深。");var result=new SortedDictionary<string,object>(StringComparer.Ordinal);
+            string[] values=key.GetValueNames(),children=key.GetSubKeyNames();if(values.Length+children.Length>64)throw new InvalidDataException("策略子键条目过多。");
+            foreach(string name in values){object value=key.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames);string text=value is byte[]?Convert.ToBase64String((byte[])value):value is string[]?String.Join(",",(string[])value):Convert.ToString(value,CultureInfo.InvariantCulture);if(text.Length>16384)throw new InvalidDataException("策略值过大。");result["value/"+name]=key.GetValueKind(name)+":"+text;}
+            foreach(string name in children)using(var child=key.OpenSubKey(name))result["key/"+name]=RegistryTree(child,depth+1);return result;
         }
         static Dictionary<string,object> ReadJson(string file)
         {
@@ -75,7 +86,7 @@ namespace EnvGuard
             if(!String.IsNullOrWhiteSpace(p.BrowserPreferences)){
                 var root=ReadJson(p.BrowserPreferences);var intl=Field(root,"intl") as Dictionary<string,object>;if(intl==null)throw new InvalidDataException("浏览器语言配置缺失。");
                 values["Chrome/accept_languages"]=Convert.ToString(Field(intl,"accept_languages"));object selected;values["Chrome/selected_languages"]=intl.TryGetValue("selected_languages",out selected)?Convert.ToString(selected):"<未设置>";
-                foreach(var hive in new[]{RegistryHive.CurrentUser,RegistryHive.LocalMachine})foreach(string name in new[]{"WebRtcIPHandling","NetworkPredictionOptions"})values["Chrome/"+hive+"/"+name]=Value(hive,@"Software\Policies\Google\Chrome",name);
+                foreach(var hive in new[]{RegistryHive.CurrentUser,RegistryHive.LocalMachine})foreach(string name in new[]{"WebRtcIPHandling","NetworkPredictionOptions","QuicAllowed","ProxySettings","BackgroundModeEnabled","SyncDisabled","WebRtcIPHandlingUrl","ProxyOverrideRules","RoamingProfileSupportEnabled","ProxyMode","ProxyServer","ProxyBypassList","ProxyPacUrl"})values["Chrome/"+hive+"/"+name]=Value(hive,@"Software\Policies\Google\Chrome",name);
             }
             if(!String.IsNullOrWhiteSpace(p.V2rayConfig)){
                 var root=ReadJson(p.V2rayConfig);values["v2rayN/已保存节点"]=Convert.ToString(Field(root,"IndexId"));
@@ -101,7 +112,7 @@ namespace EnvGuard
         public static HttpClient Client(Profile p)
         {
             var handler=Handler(p);
-            var client=new HttpClient(handler){Timeout=TimeSpan.FromMilliseconds(p.NetworkTimeoutMs)};client.DefaultRequestHeaders.UserAgent.ParseAdd("EnvGuard/1.0.0");return client;
+            var client=new HttpClient(handler){Timeout=TimeSpan.FromMilliseconds(p.NetworkTimeoutMs)};client.DefaultRequestHeaders.UserAgent.ParseAdd("EnvGuard/"+Program.Version);return client;
         }
         internal static async Task<string> Ip(HttpClient client,string url,CancellationToken token)
         {

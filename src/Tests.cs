@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using ClaudeDesktopGuard.NativeCompute;
 namespace EnvGuard
 {
@@ -38,6 +39,12 @@ namespace EnvGuard
                 var audit=new AuditLog(Path.Combine(root,"audit.jsonl"));System.Threading.Tasks.Parallel.For(0,20,i=>AssertLog(audit.Write("test",new {i=i})));Assert(File.ReadAllLines(Path.Combine(root,"audit.jsonl")).Length==20,"concurrent append log");
                 var blocked=new AuditLog(Path.Combine(root,"blocked","events.jsonl"));File.WriteAllText(Path.Combine(root,"blocked"),"not a directory");Assert(!blocked.Write("test",new{}) && blocked.Error!=null,"log failure visible");
                 Assert(Services.Executable("\"C:\\Apps\\Example\\svc.exe\" --service")==@"C:\Apps\Example\svc.exe","quoted service path");Assert(Services.Executable(@"C:\Apps\Example\svc.exe --service")==@"C:\Apps\Example\svc.exe","unquoted service path");
+                string registryTest=@"Software\EnvGuard\SnapshotSelfTest\"+Guid.NewGuid().ToString("N");try{
+                    using(var key=Registry.CurrentUser.CreateSubKey(registryTest+@"\Rules")){key.SetValue("1","initial",RegistryValueKind.String);}
+                    string first=EnvironmentChecker.Value(RegistryHive.CurrentUser,registryTest,"Rules");Assert(first.StartsWith("子键:"),"policy subkey detected");
+                    using(var key=Registry.CurrentUser.CreateSubKey(registryTest+@"\Rules")){key.SetValue("1","changed",RegistryValueKind.String);}
+                    Assert(first!=EnvironmentChecker.Value(RegistryHive.CurrentUser,registryTest,"Rules"),"policy subkey drift detected");
+                }finally{if(!registryTest.StartsWith(@"Software\EnvGuard\SnapshotSelfTest\",StringComparison.Ordinal) || registryTest.Substring(registryTest.LastIndexOf('\\')+1).Length!=32)throw new Exception("unsafe test cleanup");Registry.CurrentUser.DeleteSubKeyTree(registryTest,false);}
                 checks+=GuardComputeSystems.RunSelfTests();report.Add("PASS: pure policy, configuration, log, identity and Cowork parser checks");
                 string fixture=Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),"Fixture.exe");
                 if(File.Exists(fixture)){Fixture(root,fixture);report.Add("PASS: controlled parent, external child, orphan retention, unrelated process survival");}else throw new FileNotFoundException("Fixture.exe missing; run Build.ps1 -Test");
