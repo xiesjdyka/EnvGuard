@@ -68,7 +68,7 @@ namespace EnvGuard
             target=app;UI.Base(this,"确认紧急关闭范围",850,470);Padding=new Padding(20);
             folder.Text=Path.GetDirectoryName(app.Executable);folder.ReadOnly=true;folder.Height=30;folder.Dock=DockStyle.Top;includeFolder.Dock=DockStyle.Top;includeFolder.Height=36;includeFolder.Checked=false;
             var explanation=UI.Label("仅选 EXE：主进程 + 运行期间观察到的可验证子进程。\r\n确认专属目录后：还包括该目录内的后台进程。服务需单独勾选。",65);
-            var notice=UI.Label("共享系统服务、其他软件和未知虚拟机不会被批量结束。软件升级后要重新确认。",50);
+            var notice=UI.Label("签名应用包可自动接续正常更新；普通 EXE 改变后仍需确认。共享服务和未知虚拟机不扩大关闭范围。",50);
             var buttons=UI.Buttons();buttons.Controls.Add(UI.Button("确认范围",(s,e)=>{if(includeFolder.Checked && !Profile.SafeFolder(folder.Text)){UI.Error("该目录过于宽泛，不能用作清理范围。");return;}target.Folder=includeFolder.Checked?folder.Text:null;target.Services=includeFolder.Checked?services.CheckedItems.Cast<ServiceTarget>().ToList():new List<ServiceTarget>();DialogResult=DialogResult.OK;Close();}));buttons.Controls.Add(UI.Button("取消",(s,e)=>Close()));
             Controls.Add(services);Controls.Add(notice);Controls.Add(folder);Controls.Add(includeFolder);Controls.Add(explanation);Controls.Add(buttons);
             Shown+=async(s,e)=>{try{var found=await Task.Run(()=>Services.Discover(folder.Text));foreach(var item in found)services.Items.Add(item,false);if(found.Count>0)notice.Text="找到 "+found.Count+" 个目录内服务；需先确认专属目录，再勾选要一同结束的服务。未选服务不在关闭范围。";}catch(Exception ex){notice.Text="专属服务读取失败："+ex.Message;} };
@@ -159,7 +159,7 @@ namespace EnvGuard
                 if(ProcessScope.IsSystemPath(choice.Path) || Profile.EqualPath(choice.Path,System.Reflection.Assembly.GetExecutingAssembly().Location))throw new InvalidOperationException("不能选择系统组件或 EnvGuard 本身。");
                 if(apps.Items.Cast<AppTarget>().Any(x=>Profile.EqualPath(x.Executable,choice.Path)))return;
                 status.Text="正在读取软件身份…";var target=new AppTarget{Name=choice.Name,Executable=Path.GetFullPath(choice.Path),AppId=choice.AppId,Hash=await Task.Run(()=>Profile.FileHash(choice.Path))};
-                using(var d=new ScopeForm(target))if(d.ShowDialog(this)==DialogResult.OK){apps.Items.Add(target);InvalidateDraft();}status.Text="已添加软件；请确认环境后生成快照。";
+                using(var d=new ScopeForm(target))if(d.ShowDialog(this)==DialogResult.OK){await Task.Run(()=>PackageUpdates.BindSelected(target));apps.Items.Add(target);InvalidateDraft();}status.Text="已添加软件；请确认环境后生成快照。";
             }catch(Exception ex){UI.Error(ex.Message);}
         }
         Profile Input()
@@ -180,7 +180,7 @@ namespace EnvGuard
         {
             if(draft==null || !confirm.Checked)return;Busy(true);status.Text="保存前再次确认环境…";try{
                 if(DateTime.UtcNow-captured>TimeSpan.FromMinutes(5))throw new InvalidOperationException("快照超过 5 分钟，请重新检测确认。");
-                var p=draft;await Task.Run(async()=>{var checker=new EnvironmentChecker(p);var errors=checker.Local();var network=await checker.Network(CancellationToken.None);if(errors.Count>0 || !network.Healthy)throw new InvalidOperationException("保存前环境发生改变或尚未确认，请重新检测。\r\n"+String.Join("\r\n",errors.Concat(network.Confirmed).Concat(network.Unconfirmed)));
+                var p=draft;await Task.Run(async()=>{var checker=new EnvironmentChecker(p);var errors=checker.Local();var network=await checker.NetworkForSetup(CancellationToken.None);if(errors.Count>0 || !network.Healthy)throw new InvalidOperationException("保存前环境发生改变或尚未确认，请重新检测。\r\n"+String.Join("\r\n",errors.Concat(network.Confirmed).Concat(network.Unconfirmed)));
                     var log=new AuditLog(p.LogFile);if(!log.Write("baseline_confirmed",new {baseline=p.CapturedAt,apps=p.Apps.Select(a=>a.Name).ToArray(),snapshot=p.Settings,exit=p.ExitIp}))throw new IOException("无法写入选定日志："+log.Error);p.Save(profileFile);
                 });Result=p;Busy(false);DialogResult=DialogResult.OK;Close();
             }catch(Exception ex){status.Text="未保存："+ex.Message;UI.Error(ex.Message);}finally{if(!IsDisposed)Busy(false);}
@@ -188,7 +188,7 @@ namespace EnvGuard
         public static string Describe(Profile p)
         {
             var lines=new List<string>{"确认时间："+p.CapturedAt,"预期出口 IP："+p.ExitIp,"本机代理："+p.ProxyHost+":"+p.ProxyPort,"代理程序："+p.ProxyExecutable,"日志文件："+p.LogFile,"", "保护范围（紧急关闭会丢失未保存工作）："};
-            foreach(var a in p.Apps){lines.Add(a.Name+"："+a.Executable);lines.Add("  专属目录："+(a.Folder??"未启用；仅主进程与观察到的后代"));foreach(var s in a.Services)lines.Add("  专属服务："+s.Name+" / "+s.Executable);}
+            foreach(var a in p.Apps){lines.Add(a.Name+"："+a.Executable);lines.Add("  更新绑定："+(a.Package==null?"固定 EXE；更新后需确认":"自动接续同发布者签名应用包 / "+a.Package.Family));lines.Add("  专属目录："+(a.Folder??"未启用；仅主进程与观察到的后代"));foreach(var s in a.Services)lines.Add("  专属服务："+s.Name+" / "+s.Executable);}
             lines.Add("");foreach(var pair in p.Settings)lines.Add(pair.Key+"："+pair.Value);lines.Add("");lines.Add("正常时间流逝、自动夏令时切换不算异常。未选择的浏览器配置、字体和全流量路径不在检测范围。");return String.Join("\r\n",lines);
         }
         public void PreviewPage(int page,Profile p){review.Text=Describe(p);tabs.SelectedIndex=page;}
@@ -228,7 +228,7 @@ namespace EnvGuard
             buttons.Controls.Add(UI.Button("检查更新",async(s,e)=>await CheckUpdate()));Controls.Add(details);Controls.Add(summary);Controls.Add(status);Controls.Add(footer);Controls.Add(buttons);
             var menu=new ContextMenuStrip();menu.Items.Add("显示窗口",null,(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();});menu.Items.Add("紧急关闭保护软件",null,async(s,e)=>await Emergency());menu.Items.Add("退出预警（不关闭软件）",null,(s,e)=>Close());
             tray=new NotifyIcon{Icon=SystemIcons.Shield,Text="EnvGuard · 只预警，手动关闭",Visible=!preview,ContextMenuStrip=menu};tray.DoubleClick+=(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();};Resize+=(s,e)=>{if(WindowState==FormWindowState.Minimized && !preview)Hide();};
-            if(!preview){engine=new MonitorEngine(p);engine.Changed+=(state,show)=>{if(IsDisposed || !IsHandleCreated)return;try{BeginInvoke((Action)(()=>Render(state,show)));}catch{}};Shown+=(s,e)=>engine.Start();}
+            if(!preview){engine=new MonitorEngine(p,profileFile);engine.Changed+=(state,show)=>{if(IsDisposed || !IsHandleCreated)return;try{BeginInvoke((Action)(()=>Render(state,show)));}catch{}};Shown+=(s,e)=>engine.Start();}
             FormClosing+=(s,e)=>{if(stopping){e.Cancel=true;return;}if(!preview && !reconfigure && MessageBox.Show("退出后不再监测，也不会关闭保护软件。确定退出？","EnvGuard",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)e.Cancel=true;};
             FormClosed+=(s,e)=>{if(alert!=null)alert.Close();tray.Dispose();if(engine!=null)engine.Dispose();};
         }

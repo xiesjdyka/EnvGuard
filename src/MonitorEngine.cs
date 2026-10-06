@@ -38,6 +38,8 @@ namespace EnvGuard
     }
     public static class Services
     {
+        public static string CurrentPath(string name)
+        {using(var key=Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\"+name))return key==null?null:Executable(Convert.ToString(key.GetValue("ImagePath")));}
         public static string Executable(string command)
         {
             if(String.IsNullOrWhiteSpace(command))return null;command=Environment.ExpandEnvironmentVariables(command.Trim());
@@ -74,6 +76,7 @@ namespace EnvGuard
         Task worker;public event Action<HealthState,bool> Changed;
         public HealthState Latest {get;private set;}
         public MonitorEngine(Profile p){profile=p;checker=new EnvironmentChecker(p);scope=new ProcessScope(p);log=new AuditLog(p.LogFile);}
+        public MonitorEngine(Profile p,string profileFile){profile=p;checker=new EnvironmentChecker(p);log=new AuditLog(p.LogFile);scope=new ProcessScope(p,new PackageUpdates(p,profileFile,log));}
         public void Start(){scope.StartEvents();log.Write("monitor_started",new {version=Program.Version,baseline=profile.CapturedAt,apps=profile.Apps.Select(a=>a.Name).ToArray()});worker=Task.Run((Func<Task>)Run);}
         async Task Run()
         {
@@ -107,17 +110,23 @@ namespace EnvGuard
             try{
                 if(!log.Write("emergency_requested",new {apps=profile.Apps.Select(a=>a.Name).ToArray()}))r.Errors.Add("紧急关闭请求日志写入失败："+log.Error);
                 // Fast first wave: direct foreground and child processes, followed by service/HCS cleanup.
-                r.Errors.AddRange(scope.Refresh());int count;r.Errors.AddRange(scope.StopCurrent(out count));r.StopAttempts+=count;
+                r.Errors.AddRange(scope.Refresh(true));int count;r.Errors.AddRange(scope.StopCurrent(out count,profile.Apps.SelectMany(a=>a.Services).Select(s=>s.Executable)));r.StopAttempts+=count;
                 var configured=profile.Apps.SelectMany(a=>a.Services).GroupBy(s=>s.Name,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()).ToArray();
                 var serviceErrors=await Task.WhenAll(configured.Select(s=>Task.Run(()=>{try{Services.Stop(s);return (string)null;}catch(Exception ex){return ex.Message;}}))).ConfigureAwait(false);r.Errors.AddRange(serviceErrors.Where(x=>x!=null));
                 var cowork=configured.FirstOrDefault(s=>s.Name=="CoworkVMService");
                 if(cowork!=null){var result=CoworkAdapter.Stop(cowork);r.Errors.AddRange(result);}
+                var attemptedServices=new HashSet<string>(configured.Select(s=>s.Name+"\n"+s.Executable+"\n"+s.Hash),StringComparer.OrdinalIgnoreCase);
                 int empty=0;while(clock.ElapsedMilliseconds<12000){
-                    r.Errors.AddRange(scope.Refresh());r.Errors.AddRange(scope.StopCurrent(out count));r.StopAttempts+=count;
+                    // Force a fresh package identity check at every emergency sweep;
+                    // the normal three-second polling cache must not leave a new
+                    // registered version outside this manual close request.
+                    r.Errors.AddRange(scope.Refresh(true));r.Errors.AddRange(scope.StopCurrent(out count,profile.Apps.SelectMany(a=>a.Services).Select(s=>s.Executable)));r.StopAttempts+=count;
+                    var reboundServices=profile.Apps.SelectMany(a=>a.Services).GroupBy(s=>s.Name,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()).Where(s=>attemptedServices.Add(s.Name+"\n"+s.Executable+"\n"+s.Hash)).ToArray();
+                    foreach(var s in reboundServices)try{Services.Stop(s);if(s.Name=="CoworkVMService")r.Errors.AddRange(CoworkAdapter.Stop(s));}catch(Exception ex){r.Errors.Add(ex.Message);}
                     if(scope.Live().Count==0){empty++;if(empty>=4)break;}else empty=0;await Task.Delay(200).ConfigureAwait(false);
                 }
                 r.Remaining=scope.Live().Count;if(r.Remaining>0)r.Errors.Add("仍有 "+r.Remaining+" 个已识别进程存活。");
-                foreach(var s in configured)try{using(var service=new ServiceController(s.Name)){service.Refresh();if(service.Status!=ServiceControllerStatus.Stopped)r.Errors.Add(s.Name+" 仍未停止。");}}catch(Exception ex){r.Errors.Add(ex.Message);}
+                foreach(var s in profile.Apps.SelectMany(a=>a.Services).GroupBy(s=>s.Name,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()))try{using(var service=new ServiceController(s.Name)){service.Refresh();if(service.Status!=ServiceControllerStatus.Stopped)r.Errors.Add(s.Name+" 仍未停止。");}}catch(Exception ex){r.Errors.Add(ex.Message);}
                 r.Errors=r.Errors.Distinct().ToList();
             }catch(Exception ex){r.Errors.Add(ex.Message);}finally{r.ElapsedMs=clock.ElapsedMilliseconds;if(!log.Write("emergency_result",r))r.Errors.Add("紧急关闭结果日志写入失败："+log.Error);operation.Release();}
             return r;

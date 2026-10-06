@@ -84,9 +84,11 @@ namespace EnvGuard
         readonly Dictionary<string,ProcessRecord> owned=new Dictionary<string,ProcessRecord>();
         readonly object gate=new object();
         readonly HashCache hashes=new HashCache();
+        readonly PackageUpdates updates;
         ManagementEventWatcher watcher;
         public string TrackingWarning {get;private set;}
         public ProcessScope(Profile config){profile=config;}
+        public ProcessScope(Profile config,PackageUpdates bindingUpdates){profile=config;updates=bindingUpdates;}
         public void StartEvents()
         {
             try {watcher=new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_ProcessStartTrace"));
@@ -111,13 +113,16 @@ namespace EnvGuard
             string[] names={"System","Registry","csrss.exe","lsass.exe","services.exe","wininit.exe","winlogon.exe","svchost.exe","vmcompute.exe","vmms.exe","vmwp.exe","vmmem","vmmemWSL","wslservice.exe","wslhost.exe","wslrelay.exe","explorer.exe"};
             return p.Pid==Process.GetCurrentProcess().Id || names.Contains(p.Name,StringComparer.OrdinalIgnoreCase) || (p.Path!=null && IsSystemPath(p.Path) && !(child && SafeObservedTool(p.Path)));
         }
-        public List<string> Refresh()
+        public List<string> Refresh(bool forcePackages=false)
         {
             lock(gate){
-                var errors=new List<string>();var fresh=Native.Snapshot();
+                var errors=updates==null?new List<string>():updates.Refresh(forcePackages);var fresh=Native.Snapshot();
                 foreach(var anchor in owned.Values)anchor.Refresh();
                 var valid=new HashSet<AppTarget>();
                 foreach(var app in profile.Apps)try{if(hashes.Read(app.Executable)==app.Hash)valid.Add(app);else errors.Add(app.Name+" 程序已更新或改变，需要重新确认配置。");}catch(Exception){errors.Add(app.Name+" 程序身份无法读取。");}
+                // Keep verified previous-version roots and already-open process
+                // handles during an upgrade. Never widen to the WindowsApps root.
+                if(updates!=null)foreach(var app in updates.Coverage)try{if(hashes.Read(app.Executable)==app.Hash)valid.Add(app);}catch{}
                 foreach(var p in fresh){
                     if(owned.ContainsKey(p.Identity)){p.Dispose();continue;}
                     if(p.Path!=null && !NeverStop(p)){
@@ -141,8 +146,8 @@ namespace EnvGuard
             }
         }
         public List<ProcessRecord> Live(){lock(gate){foreach(var p in owned.Values)p.Refresh();return owned.Values.Where(p=>p.Exited==0).ToList();}}
-        public List<string> StopCurrent(out int count)
-        {lock(gate){count=0;var errors=new List<string>();foreach(var p in owned.Values.ToArray()){try{if(p.Alive){Native.Stop(p);count++;}}catch(Exception ex){errors.Add(p.Name+" PID "+p.Pid+"："+ex.Message);}}return errors;}}
+        public List<string> StopCurrent(out int count,IEnumerable<string> servicePaths=null)
+        {lock(gate){count=0;var errors=new List<string>();var deferred=new HashSet<string>(servicePaths??new string[0],StringComparer.OrdinalIgnoreCase);foreach(var p in owned.Values.ToArray()){try{if(p.Path!=null && deferred.Contains(p.Path))continue;if(p.Alive){Native.Stop(p);count++;}}catch(Exception ex){errors.Add(p.Name+" PID "+p.Pid+"："+ex.Message);}}return errors;}}
         public void Dispose(){if(watcher!=null){try{watcher.Stop();}catch{}watcher.Dispose();watcher=null;}lock(gate){foreach(var p in owned.Values)p.Dispose();owned.Clear();}}
     }
 }

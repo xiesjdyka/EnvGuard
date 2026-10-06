@@ -33,6 +33,18 @@ namespace EnvGuard
                 Assert(ProcessScope.SafeObservedTool(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","cmd.exe")),"known command child allowed only after attribution");Assert(!ProcessScope.SafeObservedTool(Path.Combine(root,"cmd.exe")),"tool exception requires exact system path");
                 var policy=new AlertPolicy();var soft=EnvironmentChecker.Classify("192.0.2.10",new[]{(string)null,(string)null},new[]{"timeout","timeout"});Assert(!policy.Apply(soft),"single timeout no warning");Assert(policy.Apply(soft),"two consecutive timeouts warning");var ok=EnvironmentChecker.Classify("192.0.2.10",new[]{"192.0.2.10","192.0.2.10"},new string[2]);Assert(!policy.Apply(ok) && policy.SoftFailures==0,"healthy reset");var changed=EnvironmentChecker.Classify("192.0.2.10",new[]{"192.0.2.11",(string)null},new[]{(string)null,"timeout"});Assert(policy.Apply(changed),"one valid changed exit immediate");Assert(policy.NewIncident(new[]{"a"}),"new incident");Assert(!policy.NewIncident(new[]{"a"}),"deduplicate repeated incident");policy.NewIncident(new string[0]);Assert(policy.NewIncident(new[]{"a"}),"new incident after reset");
                 using(var handler=EnvironmentChecker.Handler(p)){var destination=new Uri("https://api.ipify.org");Assert(handler.UseProxy && handler.Proxy.GetProxy(destination).AbsoluteUri=="http://127.0.0.1:10808/" && !handler.Proxy.IsBypassed(destination),"explicit proxy without bypass");Assert(!handler.AllowAutoRedirect && !handler.UseCookies,"no redirect or cookie fallback");}
+                var priorTls=ServicePointManager.SecurityProtocol;try{
+                    ServicePointManager.SecurityProtocol=SecurityProtocolType.Ssl3|SecurityProtocolType.Tls;
+                    using(var handler=EnvironmentChecker.Handler(p)){
+                        Assert(handler.SslProtocols==System.Security.Authentication.SslProtocols.Tls12,"TLS 1.2 even under legacy Framework defaults");
+                        Assert(handler.ServerCertificateCustomValidationCallback==null,"normal server certificate verification retained");
+                        Assert(ServicePointManager.SecurityProtocol==(SecurityProtocolType.Ssl3|SecurityProtocolType.Tls),"TLS fix does not change global or system TLS settings");
+                    }
+                }finally{ServicePointManager.SecurityProtocol=priorTls;}
+                using(var setupClient=EnvironmentChecker.SetupClient(p))Assert(setupClient.Timeout==TimeSpan.FromSeconds(8),"setup allows cold HTTPS handshakes");
+                using(var monitorClient=EnvironmentChecker.Client(p))Assert(monitorClient.Timeout==TimeSpan.FromMilliseconds(2500),"fast monitoring timeout is unchanged");
+                Assert(p.NetworkTimeoutMs==2500,"setup never mutates persisted monitor timeout");
+                p.NetworkTimeoutMs=10000;try{using(var setupClient=EnvironmentChecker.SetupClient(p))Assert(setupClient.Timeout==TimeSpan.FromSeconds(10),"setup respects a longer configured timeout");}finally{p.NetworkTimeoutMs=2500;}
                 foreach(int mode in new[]{0,1,2,3})using(var fake=new FakeHandler(mode))using(var client=new HttpClient(fake)){
                     var network=new EnvironmentChecker(p).NetworkUsing(client,CancellationToken.None).GetAwaiter().GetResult();Assert(fake.Requests==2,"two independent requests only, no retry fallback");
                     if(mode==0)Assert(network.Healthy,"response IP parsing");if(mode==1)Assert(network.Confirmed.Count>0 && network.Unconfirmed.Count>0,"partial probe failure preserves confirmed change");if(mode==2)Assert(!network.Healthy && network.Unconfirmed.Count==2,"redirect rejected as unconfirmed");if(mode==3)Assert(network.Unconfirmed.Count==2,"invalid response rejected");
@@ -48,8 +60,10 @@ namespace EnvGuard
                     Assert(first!=EnvironmentChecker.Value(RegistryHive.CurrentUser,registryTest,"Rules"),"policy subkey drift detected");
                 }finally{if(!registryTest.StartsWith(@"Software\EnvGuard\SnapshotSelfTest\",StringComparison.Ordinal) || registryTest.Substring(registryTest.LastIndexOf('\\')+1).Length!=32)throw new Exception("unsafe test cleanup");Registry.CurrentUser.DeleteSubKeyTree(registryTest,false);}
                 checks+=GuardComputeSystems.RunSelfTests();report.Add("PASS: pure policy, configuration, log, identity and Cowork parser checks");
+                Assert(CoworkAdapter.CanVerifyEmptyInventory(true,0),"stopped service and empty HCS inventory can verify absence without a new matcher");Assert(!CoworkAdapter.CanVerifyEmptyInventory(false,0)&&!CoworkAdapter.CanVerifyEmptyInventory(true,1),"unknown matcher cannot approve running service or nonempty inventory");
                 string fixture=Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),"Fixture.exe");
                 if(File.Exists(fixture)){Fixture(root,fixture);report.Add("PASS: controlled parent, external child, orphan retention, unrelated process survival");}else throw new FileNotFoundException("Fixture.exe missing; run Build.ps1 -Test");
+                checks+=PackageUpdateTests.Run(Path.Combine(root,"package-updates"),fixture);report.Add("PASS: signed package rebind, rejected impostors, unchanged environment, old/new process closure and audit");
                 EmergencyFixture(root,fixture);report.Add("PASS: actual manual emergency engine + request/result audit using fixture software only");
             }catch(Exception ex){code=1;report.Add(ex.ToString());}
             report.Add("Checks="+checks+"; ExitCode="+code);File.WriteAllLines(Path.Combine(root,"results.txt"),report);return code;

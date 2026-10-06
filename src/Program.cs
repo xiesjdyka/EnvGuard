@@ -4,13 +4,13 @@ using System.IO;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
-[assembly:System.Reflection.AssemblyVersion("1.2.3.0")]
-[assembly:System.Reflection.AssemblyFileVersion("1.2.3.0")]
+[assembly:System.Reflection.AssemblyVersion("1.2.5.0")]
+[assembly:System.Reflection.AssemblyFileVersion("1.2.5.0")]
 namespace EnvGuard
 {
     public static class Program
     {
-        public const string Version="1.2.3";
+        public const string Version="1.2.5";
         public const string DefaultRepository="xiesjdyka/EnvGuard";
         [STAThread] public static int Main(string[] args)
         {
@@ -18,6 +18,12 @@ namespace EnvGuard
             try{
                 if(args.Length>0 && args[0]=="--self-test")return Tests.Run(args.Length>1?args[1]:null);
                 if(args.Length>0 && args[0]=="--ui-smoke-test")return Tests.UIShots(args.Length>1?args[1]:Path.Combine(Path.GetTempPath(),"EnvGuard-ui"));
+                if(args.Length>0 && args[0]=="--refresh-app-bindings"){
+                    string file=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"EnvGuard","profiles","default.json");var p=Profile.Load(file);
+                    if(p.UserSid!=EnvironmentChecker.Sid() || p.Computer!=Environment.MachineName)throw new InvalidOperationException("只能接续当前设备和用户的配置。");
+                    var log=new AuditLog(p.LogFile);var issues=new PackageUpdates(p,file,log).Refresh(true);
+                    log.Write("app_binding_refresh_result",new{issues=issues.ToArray(),version=Version});return issues.Count==0?0:2;
+                }
                 if(args.Length!=0)throw new ArgumentException("支持参数：--self-test [测试目录]、--ui-smoke-test [图片目录]；日常使用直接双击。");
                 using(var identity=WindowsIdentity.GetCurrent())if(!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)){
                     try{Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location){UseShellExecute=true,Verb="runas"});return 0;}catch(System.ComponentModel.Win32Exception){UI.Error("需要在启动时确认管理员权限，才能监测服务并快速执行紧急关闭。权限未确认，本次未启动监测。");return 2;}

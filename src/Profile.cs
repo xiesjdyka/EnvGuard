@@ -14,15 +14,25 @@ namespace EnvGuard
         public string Hash { get; set; }
         public string Folder { get; set; }
         public string AppId { get; set; }
+        public PackageBinding Package { get; set; }
         public List<ServiceTarget> Services { get; set; }
         public AppTarget() { Services = new List<ServiceTarget>(); }
         public override string ToString() { return Name + "  —  " + Executable; }
+    }
+    public sealed class PackageBinding
+    {
+        public string Family { get; set; }
+        public string Publisher { get; set; }
+        public string FullName { get; set; }
+        public string ExecutableRelative { get; set; }
+        public string FolderRelative { get; set; }
     }
     public sealed class ServiceTarget
     {
         public string Name { get; set; }
         public string Executable { get; set; }
         public string Hash { get; set; }
+        public string PackageRelative { get; set; }
         public override string ToString() { return Name + "  —  " + Executable; }
     }
     public sealed class Profile
@@ -70,6 +80,7 @@ namespace EnvGuard
                 if (app.Services.Count > 32) throw new InvalidDataException("每个软件最多选择 32 个专属服务。");
                 foreach (ServiceTarget service in app.Services)
                     if (String.IsNullOrWhiteSpace(service.Name) || !Path.IsPathRooted(service.Executable) || ProcessScope.IsSystemPath(service.Executable) || !ValidHash(service.Hash) || !Within(service.Executable, app.Folder)) throw new InvalidDataException("后台服务必须属于选定的软件安装目录。");
+                if(app.Package!=null)PackageUpdates.ValidateBinding(app);
             }
         }
         public static bool ValidHash(string value) { return value != null && value.Length == 64 && value.All(Uri.IsHexDigit); }

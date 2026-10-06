@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Security.Principal;
+using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -107,12 +108,19 @@ namespace EnvGuard
         }
         internal static HttpClientHandler Handler(Profile p)
         {
-            return new HttpClientHandler{UseProxy=true,Proxy=new WebProxy("http://"+p.ProxyHost+":"+p.ProxyPort){BypassProxyOnLocal=false},AllowAutoRedirect=false,UseCookies=false};
+            // This portable .NET Framework executable can inherit legacy TLS defaults.
+            // Select TLS 1.2 on this handler only; never change Windows settings,
+            // disable certificate validation, retry weaker TLS or bypass the proxy.
+            return new HttpClientHandler{SslProtocols=SslProtocols.Tls12,UseProxy=true,Proxy=new WebProxy("http://"+p.ProxyHost+":"+p.ProxyPort){BypassProxyOnLocal=false},AllowAutoRedirect=false,UseCookies=false};
         }
         public static HttpClient Client(Profile p)
         {
             var handler=Handler(p);
             var client=new HttpClient(handler){Timeout=TimeSpan.FromMilliseconds(p.NetworkTimeoutMs)};client.DefaultRequestHeaders.UserAgent.ParseAdd("EnvGuard/"+Program.Version);return client;
+        }
+        internal static HttpClient SetupClient(Profile p)
+        {
+            var client=Client(p);client.Timeout=TimeSpan.FromMilliseconds(Math.Max(8000,p.NetworkTimeoutMs));return client;
         }
         internal static async Task<string> Ip(HttpClient client,string url,CancellationToken token)
         {
@@ -131,6 +139,12 @@ namespace EnvGuard
         {
             using(var client=Client(profile))return await NetworkUsing(client,token).ConfigureAwait(false);
         }
+        public async Task<NetworkResult> NetworkForSetup(CancellationToken token)
+        {
+            // Cold HTTPS handshakes may exceed the fast monitoring deadline.
+            // Do not persist a slower monitor timeout or accept an incomplete baseline.
+            using(var client=SetupClient(profile))return await NetworkUsing(client,token).ConfigureAwait(false);
+        }
         internal async Task<NetworkResult> NetworkUsing(HttpClient client,CancellationToken token)
         {
                 string[] urls={"https://api.ipify.org","https://checkip.amazonaws.com"};string[] ips=new string[2],failures=new string[2];
@@ -142,7 +156,7 @@ namespace EnvGuard
             p.UserSid=Sid();p.Computer=Environment.MachineName;p.CapturedAt=DateTimeOffset.Now.ToString("o");p.Settings=Snapshot(p);
             int pid=Native.ListenerPid(p.ProxyPort);if(pid==0)throw new InvalidOperationException("所选本机代理端口没有监听，不能保存基准。");
             var owner=Native.Read(pid,0,"");try{if(owner==null || owner.Path==null)throw new IOException("代理程序身份无法读取。");p.ProxyExecutable=owner.Path;p.ProxyHash=Profile.FileHash(owner.Path);}finally{if(owner!=null)owner.Dispose();}
-            var result=await new EnvironmentChecker(p).Network(CancellationToken.None).ConfigureAwait(false);
+            var result=await new EnvironmentChecker(p).NetworkForSetup(CancellationToken.None).ConfigureAwait(false);
             if(!result.Healthy || result.Addresses[0]!=result.Addresses[1])throw new InvalidOperationException(String.Join("\r\n",result.Confirmed.Concat(result.Unconfirmed)) + "\r\n出口未一致确认，不能保存基准。");
             p.ExitIp=result.Addresses[0];p.Settings=Snapshot(p);p.Validate();
         }
