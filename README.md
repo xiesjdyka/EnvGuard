@@ -16,7 +16,23 @@
 
 下载页上的 **`SHA256SUMS.txt` 只是核对下载文件有没有变化的，不是程序，可以不下载。** `Source code` 是给开发者看的源码，也不是日常使用的程序包。
 
-适用于 64 位 Windows，需要 .NET Framework 4.8。请从本仓库的发布页下载；不要为了运行程序而关闭安全软件。
+Windows 版适用于 64 位 Windows，需要 .NET Framework 4.8。macOS 版的下载和操作见下面。请从本仓库的发布页下载；不要为了运行程序而关闭安全软件。
+
+## macOS 平台支持说明
+
+**macOS 14+，支持 Apple Silicon（M 系列）与 Intel。** 原生 Swift / AppKit 界面，Universal 2 程序包；使用时不用安装 Python、.NET 或 Homebrew。Windows 版的文件、构建与逻辑保持原样，Mac 源码独立放在 [src/macos](src/macos)。
+
+### Mac 怎么开始用
+
+1. 下载 [EnvGuard_macOS_Release.zip](https://github.com/xiesjdyka/EnvGuard/releases/download/v1.2.8/EnvGuard_macOS_Release.zip)，解压整个文件夹，双击 **EnvGuard.app** 或 **环境预警检测器.command**。本版为本地签名，未做 Apple 公证；遇到系统来源提示，按 [Apple 的说明](https://support.apple.com/102445) 在“隐私与安全性”核对来源后打开，不要关闭系统安全检查。
+2. 先准备自己的代理和中继。**当前 Mac 移植版检查前置 `7890` 和中继 `20808` 两个本机端口，外网检测走 `20808` 的 HTTP 代理。** 这不是所有代理都能直接套用的通用端口配置器；端口不同需调整源码。它不会替你启动代理或中继。
+3. 点“添加保护应用”，选择要保护的 `.app`。点“立即检测”，核对出口、运营商、时区与关闭范围。公网 IP、运营商初始留空，时区取当前设备设置；不要在环境不对时接受基准。
+4. 点“确认并保存核心基准”，重新依次核对两站出口并查询运营商，全部核心条件通过才保存。之后点“开始监测”；每 11 秒一轮，8 秒超时，Amazon/ipify 交替。
+5. 默认只提醒，需要时手动紧急关闭。想自动处理出口不符或连续两轮超时，明确确认开启“自动紧急保护”。关闭窗口只是隐藏到菜单栏；从菜单栏选择退出或按 **Cmd+Q** 才停止。
+
+每台 Mac 首次都要核对并保存，Windows 的配置不能直接搬过去。**Mac 紧急关闭只覆盖已选 `.app` 内、同用户且身份再次验证通过的进程，不包括包外服务或虚拟机；应用更新后需重新确认。** DNS/WebRTC 辅助信息与核心检测分开展示，未实测不会显示为已验证。
+
+完整 Mac 使用说明、构建方法和测试范围见 [macOS 说明](src/macos/README.md)；局域网下载命令见 [Mac 文件传到 Windows](src/macos/LAN-DOWNLOAD.md)。
 
 ## 第一次只要做这几件事
 

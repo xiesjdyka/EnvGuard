@@ -1,0 +1,11 @@
+Runtime (bundled executable; no third-party runtime required):
+- macOS 14.0+ system dyld / Swift ABI runtime
+- AppKit, Foundation, CryptoKit, UniformTypeIdentifiers and system frameworks
+- /usr/bin/curl (system TLS trust; no curlrc or no-proxy bypass)
+- /usr/sbin/lsof, /usr/sbin/scutil, /usr/bin/defaults, /bin/ps, /bin/date
+No Python, .NET, Tkinter, PyQt, PyInstaller, pip packages or Homebrew needed.
+Build only: Apple Xcode Command Line Tools, Swift 5.10+, lipo, codesign.
+Universal architectures: arm64 and x86_64. Original supplied bundle reports
+arm64 tests only; repository CI runs isolated headless tests on both architectures.
+See the matching Actions run for results; this does not certify every GUI/device.
+Signing: ad-hoc (local integrity), not Apple Developer ID / notarized distribution.

@@ -1,4 +1,5 @@
 out/
+src/macos/build/
 obj/
 bin/
 *.user

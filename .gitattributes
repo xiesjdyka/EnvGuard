@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.exe binary
 *.png binary
+*.icns binary
+*.swift text eol=lf
+*.sh text eol=lf
+*.command text eol=lf
