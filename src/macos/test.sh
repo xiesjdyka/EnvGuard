@@ -4,7 +4,7 @@ SOURCE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$SOURCE/build}"
 EXE="$OUT/EnvGuard.app/Contents/MacOS/EnvGuard"
 test -x "$EXE"
-/usr/bin/lipo -verify_arch arm64 x86_64 "$EXE"
+/usr/bin/lipo "$EXE" -verify_arch arm64 x86_64
 /usr/bin/codesign --verify --deep --strict "$OUT/EnvGuard.app"
 "$EXE" --self-test | tee "$OUT/TEST-self-test.txt"
 "$EXE" --decision-self-test | tee "$OUT/TEST-decision-test.txt"
