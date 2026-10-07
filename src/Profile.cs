@@ -52,11 +52,12 @@ namespace EnvGuard
         public string V2rayConfig { get; set; }
         public List<AppTarget> Apps { get; set; }
         public int NetworkTimeoutMs { get; set; }
+        public bool AutoKillOnAnomaly { get; set; }
         public string GitHubRepository { get; set; }
         public Profile()
         {
-            Schema = 1; Apps = new List<AppTarget>(); Settings = new Dictionary<string, string>();
-            ProxyHost = "127.0.0.1"; ProxyPort = 10808; NetworkTimeoutMs = 2500;
+            Schema = 1; AutoKillOnAnomaly = false; Apps = new List<AppTarget>(); Settings = new Dictionary<string, string>();
+            ProxyHost = "127.0.0.1"; ProxyPort = 10808; NetworkTimeoutMs = NetworkTiming.RequestTimeoutMs;
         }
         public void Validate()
         {

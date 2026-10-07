@@ -42,11 +42,13 @@ namespace EnvGuard
                     }
                 }finally{ServicePointManager.SecurityProtocol=priorTls;}
                 using(var setupClient=EnvironmentChecker.SetupClient(p))Assert(setupClient.Timeout==TimeSpan.FromSeconds(8),"setup allows cold HTTPS handshakes");
-                using(var monitorClient=EnvironmentChecker.Client(p))Assert(monitorClient.Timeout==TimeSpan.FromMilliseconds(2500),"fast monitoring timeout is unchanged");
-                Assert(p.NetworkTimeoutMs==2500,"setup never mutates persisted monitor timeout");
-                p.NetworkTimeoutMs=10000;try{using(var setupClient=EnvironmentChecker.SetupClient(p))Assert(setupClient.Timeout==TimeSpan.FromSeconds(10),"setup respects a longer configured timeout");}finally{p.NetworkTimeoutMs=2500;}
+                using(var monitorClient=EnvironmentChecker.Client(p))Assert(monitorClient.Timeout==TimeSpan.FromSeconds(8),"monitor timeout is eight seconds");
+                Assert(p.NetworkTimeoutMs==8000,"setup never mutates persisted monitor timeout");
+                foreach(int oldTimeout in new[]{2500,4000}){p.NetworkTimeoutMs=oldTimeout;try{using(var monitorClient=EnvironmentChecker.Client(p))Assert(monitorClient.Timeout==TimeSpan.FromSeconds(8),"legacy profile uses eight-second monitor timeout");}finally{p.NetworkTimeoutMs=8000;}}
+                p.NetworkTimeoutMs=10000;try{using(var setupClient=EnvironmentChecker.SetupClient(p))Assert(setupClient.Timeout==TimeSpan.FromSeconds(10),"setup respects a longer configured timeout");using(var monitorClient=EnvironmentChecker.Client(p))Assert(monitorClient.Timeout==TimeSpan.FromSeconds(8),"monitor has a fixed eight-second timeout");}finally{p.NetworkTimeoutMs=8000;}
+                checks+=NetworkPolicyTests.Run(p);checks+=AutomaticProtectionTests.Run(p);
                 foreach(int mode in new[]{0,1,2,3})using(var fake=new FakeHandler(mode))using(var client=new HttpClient(fake)){
-                    var network=new EnvironmentChecker(p).NetworkUsing(client,CancellationToken.None).GetAwaiter().GetResult();Assert(fake.Requests==2,"two independent requests only, no retry fallback");
+                    var network=new EnvironmentChecker(p).NetworkSetupUsing(client,CancellationToken.None).GetAwaiter().GetResult();Assert(fake.Requests==2,"two independent setup requests only, no retry fallback");
                     if(mode==0)Assert(network.Healthy,"response IP parsing");if(mode==1)Assert(network.Confirmed.Count>0 && network.Unconfirmed.Count>0,"partial probe failure preserves confirmed change");if(mode==2)Assert(!network.Healthy && network.Unconfirmed.Count==2,"redirect rejected as unconfirmed");if(mode==3)Assert(network.Unconfirmed.Count==2,"invalid response rejected");
                 }
                 string config=Path.Combine(root,"profile.json");p.Save(config);Assert(Profile.Load(config).ExitIp==p.ExitIp,"profile roundtrip");p.Settings["Windows 时区"]="other";p.Save(config);Assert(Profile.Load(config).Settings["Windows 时区"]=="other","atomic replacement");
@@ -65,6 +67,7 @@ namespace EnvGuard
                 if(File.Exists(fixture)){Fixture(root,fixture);report.Add("PASS: controlled parent, external child, orphan retention, unrelated process survival");}else throw new FileNotFoundException("Fixture.exe missing; run Build.ps1 -Test");
                 checks+=PackageUpdateTests.Run(Path.Combine(root,"package-updates"),fixture);report.Add("PASS: signed package rebind, rejected impostors, unchanged environment, old/new process closure and audit");
                 EmergencyFixture(root,fixture);report.Add("PASS: actual manual emergency engine + request/result audit using fixture software only");
+                AutomaticEmergencyFixture(root,fixture);report.Add("PASS: optional automatic emergency closes fixture parent/child only, preserves unrelated process and audits mode/trigger/result");
             }catch(Exception ex){code=1;report.Add(ex.ToString());}
             report.Add("Checks="+checks+"; ExitCode="+code);File.WriteAllLines(Path.Combine(root,"results.txt"),report);return code;
         }
@@ -94,10 +97,12 @@ namespace EnvGuard
             Directory.CreateDirectory(directory);var p=Demo(directory);
             using(var wizard=new SetupForm(Path.Combine(directory,"never-saved.json"),p)){Shot(wizard,Path.Combine(directory,"setup.png"));wizard.PreviewPage(1,p);Shot(wizard,Path.Combine(directory,"environment.png"));Assert(!wizard.AdvancedShown,"optional checks collapsed initially");Assert(wizard.FieldsAligned,"setup input edges and heights aligned");wizard.PreviewAdvanced(true);Shot(wizard,Path.Combine(directory,"environment-advanced.png"));Assert(wizard.AdvancedShown,"optional checks explicitly expandable");Assert(wizard.FieldsAligned,"advanced fields aligned with primary fields");wizard.PreviewAdvancedBottom();Shot(wizard,Path.Combine(directory,"environment-browser.png"));wizard.PreviewPage(2,p);Shot(wizard,Path.Combine(directory,"baseline.png"));}
             using(var wizard=new SetupForm(Path.Combine(directory,"never-saved-scaled.json"),p)){wizard.PreviewPage(1,p);wizard.Scale(new SizeF(1.5f,1.5f));Shot(wizard,Path.Combine(directory,"environment-scaled.png"));Assert(wizard.FieldsAligned,"inputs aligned at simulated 150 percent scaling");}
-            using(var main=new MainForm(p,"",true)){main.Render(new HealthState{Time=DateTimeOffset.Now,NetworkReady=true,ProcessCount=4},false);Shot(main,Path.Combine(directory,"monitor.png"));}
+            using(var main=new MainForm(p,"",true)){main.Render(new HealthState{Time=DateTimeOffset.Now,NetworkReady=true,ProcessCount=4},false);Shot(main,Path.Combine(directory,"monitor.png"));Assert(!main.AutomaticChecked&&main.ModeText.Contains("手动模式"),"main defaults manual");main.PreviewAutomatic(true);Shot(main,Path.Combine(directory,"monitor-automatic.png"));Assert(main.AutomaticChecked&&main.ModeText.Contains("自动紧急关闭"),"checkbox changes visible mode");main.PreviewAutomatic(false);Assert(!main.AutomaticChecked&&!p.AutoKillOnAnomaly,"uncheck restores manual");}
+            using(var wizard=new SetupForm(Path.Combine(directory,"never-saved-auto.json"),p)){wizard.PreviewPage(1,p);Assert(!wizard.AutomaticChecked,"configuration defaults automatic off");wizard.PreviewAutomatic(true);Shot(wizard,Path.Combine(directory,"environment-auto.png"));Assert(wizard.AutomaticChecked,"configuration checkbox selectable");}
             var initial=new HealthState{Time=DateTimeOffset.Now,Issues=new[]{"网络检查连续两轮未确认。不是已确定代理掉线。","时区与确认的基准不同。"}};
             using(var alert=new AlertForm(initial,()=>System.Threading.Tasks.Task.FromResult(0))){Shot(alert,Path.Combine(directory,"warning.png"));alert.UpdateState(new HealthState{Time=DateTimeOffset.Now,NetworkReady=true});Shot(alert,Path.Combine(directory,"recovered.png"));}
-            File.WriteAllText(Path.Combine(directory,"ui-result.txt"),"PASS: 5 UI layout/disclosure assertions, including advanced fields and simulated 150 percent scaling.\r\nSynthetic data only; no monitor, network probes or emergency actions started.");return 0;
+            using(var alert=new AlertForm(initial,()=>Task.FromResult(0),true)){alert.UpdateAutomaticResult(new AutomaticProtectionResult{Causes=initial.Issues,Result=new StopResult{Coverage="Synthetic fixture only",ElapsedMs=724}},initial);Shot(alert,Path.Combine(directory,"automatic-result.png"));}
+            File.WriteAllText(Path.Combine(directory,"ui-result.txt"),"PASS: 10 UI layout/disclosure/mode assertions, including advanced fields and simulated 150 percent scaling.\r\nSynthetic data only; no monitor, network probes or emergency actions started.");return 0;
         }
         static void EmergencyFixture(string root,string fixture)
         {
@@ -106,8 +111,39 @@ namespace EnvGuard
             var p=Demo(root);p.LogFile=Path.Combine(root,"emergency.jsonl");p.Apps=new List<AppTarget>{new AppTarget{Name="Emergency fixture only",Executable=a,Hash=Profile.FileHash(a),Folder=own}};
             using(var unrelated=Process.Start(new ProcessStartInfo(other){UseShellExecute=false,CreateNoWindow=true}))using(var main=Process.Start(new ProcessStartInfo(a,"--parent \""+b+"\" \""+ready+"\""){UseShellExecute=false,CreateNoWindow=true})){
                 int childPid=0;try{var clock=Stopwatch.StartNew();while(!File.Exists(ready) && clock.ElapsedMilliseconds<4000)Thread.Sleep(50);Assert(File.Exists(ready),"emergency fixture ready");childPid=Int32.Parse(File.ReadAllText(ready));
-                    using(var engine=new MonitorEngine(p)){var result=engine.Emergency().GetAwaiter().GetResult();Assert(result.Success && result.Remaining==0,"manual emergency verified empty");Assert(result.StopAttempts>=2,"manual emergency includes child");Assert(!unrelated.HasExited,"manual emergency spares unrelated");var lines=File.ReadAllLines(p.LogFile);Assert(lines.Any(x=>x.Contains("emergency_requested")) && lines.Any(x=>x.Contains("emergency_result")),"manual emergency audit both events");}
+                    using(var engine=new MonitorEngine(p)){var running=engine.Emergency();var duplicate=engine.Emergency().GetAwaiter().GetResult();Assert(!duplicate.Success&&duplicate.StopAttempts==0,"concurrent manual/automatic emergency cannot duplicate closure");var result=running.GetAwaiter().GetResult();Assert(result.Success && result.Remaining==0,"manual emergency verified empty");Assert(result.StopAttempts>=2,"manual emergency includes child");Assert(!unrelated.HasExited,"manual emergency spares unrelated");var lines=File.ReadAllLines(p.LogFile);Assert(lines.Any(x=>x.Contains("emergency_requested")) && lines.Any(x=>x.Contains("emergency_result")),"manual emergency audit both events");}
                 }finally{try{if(!main.HasExited)main.Kill();}catch{}try{if(!unrelated.HasExited)unrelated.Kill();}catch{}if(childPid>0)try{using(var child=Process.GetProcessById(childPid)){if(Profile.EqualPath(child.MainModule.FileName,b))child.Kill();}}catch{} }
+            }
+        }
+        static void AutomaticEmergencyFixture(string root,string fixture)
+        {
+            string own=Path.Combine(root,"auto-owned"),external=Path.Combine(root,"auto-external");Directory.CreateDirectory(own);Directory.CreateDirectory(external);
+            string parentFile=Path.Combine(own,"Parent.exe"),childFile=Path.Combine(external,"Child.exe"),otherFile=Path.Combine(external,"Other.exe"),ready=Path.Combine(root,"auto-ready.txt");File.Copy(fixture,parentFile,true);File.Copy(fixture,childFile,true);File.Copy(fixture,otherFile,true);
+            var p=Demo(root);p.LogFile=Path.Combine(root,"auto-emergency.jsonl");p.Apps=new List<AppTarget>{new AppTarget{Name="Automatic fixture only",Executable=parentFile,Hash=Profile.FileHash(parentFile),Folder=own}};
+            string config=Path.Combine(root,"auto-profile.json");p.Save(config);string original=File.ReadAllText(config);
+            using(var unrelated=Process.Start(new ProcessStartInfo(otherFile){UseShellExecute=false,CreateNoWindow=true}))
+            using(var parent=Process.Start(new ProcessStartInfo(parentFile,"--parent \""+childFile+"\" \""+ready+"\""){UseShellExecute=false,CreateNoWindow=true})){
+                int childPid=0;try{
+                    var clock=Stopwatch.StartNew();while(!File.Exists(ready)&&clock.ElapsedMilliseconds<4000)Thread.Sleep(50);Assert(File.Exists(ready),"automatic fixture ready");childPid=Int32.Parse(File.ReadAllText(ready));
+                    using(var engine=new MonitorEngine(p,config)){
+                        var changed=EnvironmentChecker.Classify(p.ExitIp,new[]{"192.0.2.99"},new string[1]);engine.ObserveAutomaticNetwork(changed);
+                        Assert(!engine.TryClaimAutomaticProtection()&&!parent.HasExited,"disabled automatic mismatch does not kill parent");
+                        engine.SetAutomaticMode(true).GetAwaiter().GetResult();Assert(engine.AutoKillEnabled&&Profile.Load(config).AutoKillOnAnomaly,"mode persisted before being armed");
+                        Assert(File.ReadAllText(config).Replace("\"AutoKillOnAnomaly\":true","\"AutoKillOnAnomaly\":false")==original,"mode toggle preserves baseline and target scope exactly");
+                        var healthy=EnvironmentChecker.Classify(p.ExitIp,new[]{p.ExitIp},new string[1]);engine.ObserveAutomaticNetwork(healthy);
+                        var timeout=EnvironmentChecker.Classify(p.ExitIp,new[]{(string)null},new[]{"timeout"});timeout.TimeoutCount=1;
+                        engine.ObserveAutomaticNetwork(timeout);Assert(!engine.TryClaimAutomaticProtection()&&!parent.HasExited,"single timeout spares fixture");
+                        engine.ObserveAutomaticNetwork(timeout);Assert(engine.TryClaimAutomaticProtection(),"second timeout claims emergency");
+                        int events=0;engine.AutomaticProtectionCompleted+=r=>{events++;Assert(r.Result.Success,"automatic completion event reflects verified result");};
+                        var report=engine.ExecuteAutomaticProtection(engine.AutomaticCauses).GetAwaiter().GetResult();
+                        Assert(report.Result.Success&&report.Result.Remaining==0&&report.Result.StopAttempts>=2,"automatic uses existing parent and child emergency closure");
+                        Assert(events==1&&!engine.IsEmergencyRunning,"one completion event, emergency guard released");Assert(!unrelated.HasExited,"automatic emergency preserves unrelated process");
+                        Assert(!engine.TryClaimAutomaticProtection(),"same incident never repeatedly closes");
+                        var lines=File.ReadAllLines(p.LogFile);Assert(lines.Any(x=>x.Contains("automatic_mode_changed"))&&lines.Any(x=>x.Contains("automatic_emergency_triggered"))&&lines.Any(x=>x.Contains("automatic_emergency_result")),"mode, cause and automatic result audit");
+                        Assert(lines.Any(x=>x.Contains("emergency_requested"))&&lines.Any(x=>x.Contains("emergency_result")),"existing emergency audit retained");
+                        engine.SetAutomaticMode(false).GetAwaiter().GetResult();Assert(!Profile.Load(config).AutoKillOnAnomaly&&!engine.AutoKillEnabled,"manual mode restored and persisted");
+                    }
+                }finally{try{if(!parent.HasExited)parent.Kill();}catch{}try{if(!unrelated.HasExited)unrelated.Kill();}catch{}if(childPid>0)try{using(var child=Process.GetProcessById(childPid)){if(Profile.EqualPath(child.MainModule.FileName,childFile))child.Kill();}}catch{} }
             }
         }
         static void Shot(Form form,string path){form.StartPosition=FormStartPosition.Manual;form.Location=new Point(-20000,-20000);form.Show();Application.DoEvents();form.PerformLayout();using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(0,0,bitmap.Width,bitmap.Height));bitmap.Save(path,System.Drawing.Imaging.ImageFormat.Png);}}

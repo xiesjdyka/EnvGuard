@@ -4,13 +4,13 @@ using System.IO;
 using System.Security.Principal;
 using System.Threading;
 using System.Windows.Forms;
-[assembly:System.Reflection.AssemblyVersion("1.2.5.0")]
-[assembly:System.Reflection.AssemblyFileVersion("1.2.5.0")]
+[assembly:System.Reflection.AssemblyVersion("1.2.8.0")]
+[assembly:System.Reflection.AssemblyFileVersion("1.2.8.0")]
 namespace EnvGuard
 {
     public static class Program
     {
-        public const string Version="1.2.5";
+        public const string Version="1.2.8";
         public const string DefaultRepository="xiesjdyka/EnvGuard";
         [STAThread] public static int Main(string[] args)
         {
@@ -18,6 +18,14 @@ namespace EnvGuard
             try{
                 if(args.Length>0 && args[0]=="--self-test")return Tests.Run(args.Length>1?args[1]:null);
                 if(args.Length>0 && args[0]=="--ui-smoke-test")return Tests.UIShots(args.Length>1?args[1]:Path.Combine(Path.GetTempPath(),"EnvGuard-ui"));
+                if(args.Length==1 && args[0]=="--refresh-network-policy"){
+                    string file=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"EnvGuard","profiles","default.json");var p=Profile.Load(file);
+                    if(p.UserSid!=EnvironmentChecker.Sid() || p.Computer!=Environment.MachineName)throw new InvalidOperationException("只能更新当前设备和用户的检测时限。");
+                    var log=new AuditLog(p.LogFile);int old=p.NetworkTimeoutMs;
+                    if(!log.Write("network_policy_update_prepared",new {previousTimeoutMs=old,timeoutMs=NetworkTiming.RequestTimeoutMs,intervalMs=NetworkTiming.PollIntervalMs,threshold=NetworkTiming.FailureThreshold}))throw new IOException("无法记录网络策略修改。");
+                    p.NetworkTimeoutMs=NetworkTiming.RequestTimeoutMs;p.Save(file);
+                    return log.Write("network_policy_updated",new {version=Version,timeoutMs=NetworkTiming.RequestTimeoutMs,intervalMs=NetworkTiming.PollIntervalMs,threshold=NetworkTiming.FailureThreshold})?0:2;
+                }
                 if(args.Length>0 && args[0]=="--refresh-app-bindings"){
                     string file=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"EnvGuard","profiles","default.json");var p=Profile.Load(file);
                     if(p.UserSid!=EnvironmentChecker.Sid() || p.Computer!=Environment.MachineName)throw new InvalidOperationException("只能接续当前设备和用户的配置。");

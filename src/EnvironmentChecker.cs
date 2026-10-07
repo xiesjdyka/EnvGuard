@@ -32,12 +32,16 @@ namespace EnvGuard
     {
         public List<string> Confirmed=new List<string>(),Unconfirmed=new List<string>();
         public string[] Addresses;
-        public bool Healthy {get{return Confirmed.Count==0 && Unconfirmed.Count==0 && Addresses!=null && Addresses.Length==2;}}
+        public int TimeoutCount;
+        public string Endpoint;
+        public bool Healthy {get{return Confirmed.Count==0 && Unconfirmed.Count==0 && Addresses!=null && Addresses.Length>0 && Addresses.All(x=>x!=null);}}
     }
     public sealed class EnvironmentChecker
     {
         readonly Profile profile;
         readonly HashCache hashes=new HashCache();
+        int networkRound;
+        static readonly string[] ProbeUrls={"https://checkip.amazonaws.com","https://api.ipify.org"};
         public EnvironmentChecker(Profile p){profile=p;}
         public static string Sid(){using(var i=WindowsIdentity.GetCurrent())return i.User.Value;}
         internal static string Value(RegistryHive hive,string path,string name)
@@ -116,7 +120,9 @@ namespace EnvGuard
         public static HttpClient Client(Profile p)
         {
             var handler=Handler(p);
-            var client=new HttpClient(handler){Timeout=TimeSpan.FromMilliseconds(p.NetworkTimeoutMs)};client.DefaultRequestHeaders.UserAgent.ParseAdd("EnvGuard/"+Program.Version);return client;
+            // All monitor requests, including legacy profiles, allow 8s for
+            // chained cross-border handshakes. Never retry directly on timeout.
+            var client=new HttpClient(handler){Timeout=TimeSpan.FromMilliseconds(NetworkTiming.RequestTimeoutMs)};client.DefaultRequestHeaders.UserAgent.ParseAdd("EnvGuard/"+Program.Version);return client;
         }
         internal static HttpClient SetupClient(Profile p)
         {
@@ -133,23 +139,56 @@ namespace EnvGuard
         {
             var r=new NetworkResult();r.Addresses=ips;
             for(int i=0;i<ips.Length;i++){if(ips[i]!=null && ips[i]!=expected && !String.IsNullOrEmpty(expected))r.Confirmed.Add("出口变化：预期 "+expected+"，检测到 "+ips[i]+"。");if(failures[i]!=null)r.Unconfirmed.Add(failures[i]);}
-            if(ips.All(x=>x!=null) && ips[0]!=ips[1])r.Confirmed.Add("两个独立出口检测结果不一致。");return r;
+            if(ips.Length==2 && ips.All(x=>x!=null) && ips[0]!=ips[1])r.Confirmed.Add("两个独立出口检测结果不一致。");return r;
         }
         public async Task<NetworkResult> Network(CancellationToken token)
         {
             using(var client=Client(profile))return await NetworkUsing(client,token).ConfigureAwait(false);
         }
+        internal async Task<NetworkResult> Network(CancellationToken token,Action<NetworkResult> confirmedChange)
+        {
+            using(var client=Client(profile))return await NetworkUsing(client,token,confirmedChange).ConfigureAwait(false);
+        }
         public async Task<NetworkResult> NetworkForSetup(CancellationToken token)
         {
             // Cold HTTPS handshakes may exceed the fast monitoring deadline.
             // Do not persist a slower monitor timeout or accept an incomplete baseline.
-            using(var client=SetupClient(profile))return await NetworkUsing(client,token).ConfigureAwait(false);
+            using(var client=SetupClient(profile))return await NetworkSetupUsing(client,token).ConfigureAwait(false);
         }
-        internal async Task<NetworkResult> NetworkUsing(HttpClient client,CancellationToken token)
+        internal async Task<NetworkResult> NetworkUsing(HttpClient client,CancellationToken token,Action<NetworkResult> confirmedChange=null)
         {
-                string[] urls={"https://api.ipify.org","https://checkip.amazonaws.com"};string[] ips=new string[2],failures=new string[2];
-                await Task.WhenAll(urls.Select(async(url,i)=>{try{ips[i]=await Ip(client,url,token).ConfigureAwait(false);}catch(Exception ex){if(token.IsCancellationRequested)throw;failures[i]="出口检查 "+(i+1)+" 尚未确认（"+ex.GetType().Name+"），不等于已确定代理掉线。";}})).ConfigureAwait(false);
-                return Classify(profile.ExitIp,ips,failures);
+            // One request per round, starting with Amazon. Failure consumes the
+            // round too: the next scheduled round checks the other provider.
+            int index=(Interlocked.Increment(ref networkRound)-1)&1;
+            var result=await ProbeUsing(client,ProbeUrls[index],token).ConfigureAwait(false);
+            if(result.Confirmed.Count>0 && confirmedChange!=null)confirmedChange(result);
+            return result;
+        }
+        internal async Task<NetworkResult> ProbeUsing(HttpClient client,string url,CancellationToken token)
+        {
+            string[] ips=new string[1],failures=new string[1];int timeouts=0;
+            try{ips[0]=await Ip(client,url,token).ConfigureAwait(false);}
+            catch(Exception ex){
+                if(token.IsCancellationRequested)throw;
+                bool timeout=ex is OperationCanceledException || ex is TimeoutException;
+                if(timeout)timeouts=1;
+                // Keep the incident reason stable across alternating providers;
+                // the actual endpoint is recorded separately in the audit log.
+                failures[0]=timeout?"出口检查超时，出口尚未确认。":
+                    "出口检查尚未确认（"+ex.GetType().Name+"），不等于已确定代理掉线。";
+            }
+            token.ThrowIfCancellationRequested();
+            var result=Classify(profile.ExitIp,ips,failures);result.TimeoutCount=timeouts;result.Endpoint=new Uri(url).Host;return result;
+        }
+        internal async Task<NetworkResult> NetworkSetupUsing(HttpClient client,CancellationToken token)
+        {
+            // Baseline setup still requires agreement from both providers,
+            // queried sequentially; this does not consume monitoring rounds.
+            var first=await ProbeUsing(client,ProbeUrls[0],token).ConfigureAwait(false);
+            var second=await ProbeUsing(client,ProbeUrls[1],token).ConfigureAwait(false);
+            var result=Classify(profile.ExitIp,new[]{first.Addresses[0],second.Addresses[0]},new string[2]);
+            result.Unconfirmed.AddRange(first.Unconfirmed);result.Unconfirmed.AddRange(second.Unconfirmed);
+            result.TimeoutCount=first.TimeoutCount+second.TimeoutCount;return result;
         }
         public static async Task Capture(Profile p)
         {

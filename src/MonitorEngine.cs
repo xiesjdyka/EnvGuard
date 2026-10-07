@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -16,6 +17,8 @@ namespace EnvGuard
         public DateTimeOffset Time;
         public bool NetworkReady,NetworkPending;
         public int ProcessCount;
+        public int NetworkFailures;
+        public bool AutoEmergencyRunning;
         public string[] Issues=new string[0];
         public string LogError;
         public bool Healthy {get{return Issues.Length==0 && NetworkReady && LogError==null;}}
@@ -25,7 +28,7 @@ namespace EnvGuard
     {
         public int SoftFailures {get;private set;}
         string signature="";
-        public bool Apply(NetworkResult r){if(r.Healthy){SoftFailures=0;return false;}if(r.Unconfirmed.Count>0)SoftFailures++;return r.Confirmed.Count>0 || SoftFailures>=2;}
+        public bool Apply(NetworkResult r){if(r.Healthy){SoftFailures=0;return false;}if(r.Unconfirmed.Count>0)SoftFailures++;else SoftFailures=0;return r.Confirmed.Count>0 || SoftFailures>=NetworkTiming.FailureThreshold;}
         public bool NewIncident(IEnumerable<string> issues){string next=String.Join("\n",issues.OrderBy(x=>x));bool notify=next.Length>0 && next!=signature;signature=next;return notify;}
     }
     public sealed class StopResult
@@ -72,40 +75,80 @@ namespace EnvGuard
     {
         readonly Profile profile;readonly EnvironmentChecker checker;readonly ProcessScope scope;readonly AuditLog log;
         readonly CancellationTokenSource cancel=new CancellationTokenSource();readonly AlertPolicy policy=new AlertPolicy();
+        readonly AutomaticProtectionPolicy automaticPolicy=new AutomaticProtectionPolicy();
+        int automaticEnabled,emergencyRunning;
         readonly SemaphoreSlim operation=new SemaphoreSlim(1,1);
         Task worker;public event Action<HealthState,bool> Changed;
+        public event Action<AutomaticProtectionResult> AutomaticProtectionCompleted;
+        public bool AutoKillEnabled {get{return Volatile.Read(ref automaticEnabled)!=0;}}
+        public bool IsEmergencyRunning {get{return Volatile.Read(ref emergencyRunning)!=0;}}
         public HealthState Latest {get;private set;}
-        public MonitorEngine(Profile p){profile=p;checker=new EnvironmentChecker(p);scope=new ProcessScope(p);log=new AuditLog(p.LogFile);}
-        public MonitorEngine(Profile p,string profileFile){profile=p;checker=new EnvironmentChecker(p);log=new AuditLog(p.LogFile);scope=new ProcessScope(p,new PackageUpdates(p,profileFile,log));}
-        public void Start(){scope.StartEvents();log.Write("monitor_started",new {version=Program.Version,baseline=profile.CapturedAt,apps=profile.Apps.Select(a=>a.Name).ToArray()});worker=Task.Run((Func<Task>)Run);}
+        readonly string configurationFile;
+        public MonitorEngine(Profile p){profile=p;automaticEnabled=p.AutoKillOnAnomaly?1:0;checker=new EnvironmentChecker(p);scope=new ProcessScope(p);log=new AuditLog(p.LogFile);}
+        public MonitorEngine(Profile p,string profileFile){profile=p;configurationFile=profileFile;automaticEnabled=p.AutoKillOnAnomaly?1:0;checker=new EnvironmentChecker(p);log=new AuditLog(p.LogFile);scope=new ProcessScope(p,new PackageUpdates(p,profileFile,log));}
+        public async Task SetAutomaticMode(bool enabled)
+        {
+            await operation.WaitAsync(cancel.Token).ConfigureAwait(false);
+            try{
+                bool old=profile.AutoKillOnAnomaly;
+                if(!log.Write("automatic_mode_change_prepared",new {previous=old,enabled=enabled}))throw new IOException("无法记录模式修改："+log.Error);
+                profile.AutoKillOnAnomaly=enabled;
+                try{if(!String.IsNullOrEmpty(configurationFile))profile.Save(configurationFile);}catch{profile.AutoKillOnAnomaly=old;throw;}
+                Volatile.Write(ref automaticEnabled,enabled?1:0);
+                if(!log.Write("automatic_mode_changed",new {enabled=enabled}))throw new IOException("模式已保存，但结果日志写入失败："+log.Error);
+            }finally{operation.Release();}
+        }
+        public void Start(){scope.StartEvents();log.Write("monitor_started",new {version=Program.Version,baseline=profile.CapturedAt,apps=profile.Apps.Select(a=>a.Name).ToArray(),autoKillOnAnomaly=AutoKillEnabled,networkIntervalMs=NetworkTiming.PollIntervalMs,networkTimeoutMs=NetworkTiming.RequestTimeoutMs,networkFailureThreshold=NetworkTiming.FailureThreshold,networkProbeMode="alternating",networkProbeOrder=new[]{"checkip.amazonaws.com","api.ipify.org"}});worker=Task.Run((Func<Task>)Run);}
         async Task Run()
         {
-            Task<NetworkResult> pending=null;NetworkResult last=null;bool networkWarning=false;DateTime next=DateTime.MinValue;DateTimeOffset? incidentAt=null;
+            Task<NetworkResult> pending=null;NetworkResult last=null;bool networkWarning=false;DateTimeOffset? incidentAt=null;
+            var clock=Stopwatch.StartNew();var schedule=new NetworkSchedule();var immediate=new ConcurrentQueue<NetworkResult>();long round=0;
             while(!cancel.IsCancellationRequested){
                 try{
-                    if(pending==null && DateTime.UtcNow>=next)pending=checker.Network(cancel.Token);
-                    if(pending!=null && pending.IsCompleted){last=await pending.ConfigureAwait(false);pending=null;next=DateTime.UtcNow.AddSeconds(1);networkWarning=policy.Apply(last);
-                        if(!last.Healthy)log.Write(networkWarning?"network_abnormal":"network_unconfirmed",new {confirmed=last.Confirmed,unconfirmed=last.Unconfirmed,addresses=last.Addresses,consecutive=policy.SoftFailures});
+                    if(schedule.Due(clock.ElapsedMilliseconds,pending!=null)){schedule.Started(clock.ElapsedMilliseconds);round++;pending=checker.Network(cancel.Token,r=>immediate.Enqueue(r));}
+                    NetworkResult changed;
+                    while(immediate.TryDequeue(out changed)){
+                        last=changed;networkWarning=true;
+                        log.Write("network_exit_changed",new {round=round,endpoint=changed.Endpoint,confirmed=changed.Confirmed,addresses=changed.Addresses});
+                    }
+                    if(pending!=null && pending.IsCompleted){last=await pending.ConfigureAwait(false);pending=null;int previousFailures=policy.SoftFailures;networkWarning=policy.Apply(last);ObserveAutomaticNetwork(last);
+                        if(!last.Healthy)log.Write(networkWarning?"network_abnormal":"network_unconfirmed",new {round=round,endpoint=last.Endpoint,confirmed=last.Confirmed,unconfirmed=last.Unconfirmed,addresses=last.Addresses,timeouts=last.TimeoutCount,consecutive=policy.SoftFailures,timeoutMs=NetworkTiming.RequestTimeoutMs,nextCheckInMs=Math.Max(0,schedule.NextStartMs-clock.ElapsedMilliseconds)});
+                        else if(previousFailures>0)log.Write("network_reconfirmed",new {round=round,endpoint=last.Endpoint,addresses=last.Addresses,previousConsecutive=previousFailures});
                     }
                     await operation.WaitAsync(cancel.Token).ConfigureAwait(false);List<string> issues;
                     try{issues=checker.Local();issues.AddRange(scope.Refresh());}finally{operation.Release();}
-                    if(last!=null){issues.AddRange(last.Confirmed);if(networkWarning)issues.AddRange(last.Unconfirmed);}
-                    var state=new HealthState{Time=DateTimeOffset.Now,Issues=issues.Distinct().ToArray(),ProcessCount=scope.Live().Count,NetworkReady=last!=null && last.Healthy,NetworkPending=last!=null && !last.Healthy && !networkWarning};
+                    // Confirmed mismatch takes precedence over uncertainty.
+                    if(last!=null){issues.AddRange(last.Confirmed);if(networkWarning && last.Confirmed.Count==0)issues.AddRange(last.Unconfirmed);}
+                    var state=new HealthState{Time=DateTimeOffset.Now,Issues=issues.Distinct().ToArray(),ProcessCount=scope.Live().Count,NetworkFailures=policy.SoftFailures,NetworkReady=last!=null && last.Healthy,NetworkPending=last!=null && !last.Healthy && !networkWarning};
                     if(log.Error!=null)log.Write("log_recovery_probe",new {previous=log.Error});
                     state.LogError=log.Error;var alertIssues=state.Issues.ToList();if(state.LogError!=null)alertIssues.Add("日志无法保存："+state.LogError);
                     bool alert=policy.NewIncident(alertIssues);
                     if(alert){if(!incidentAt.HasValue)incidentAt=state.Time;log.Write("warning",new {causes=alertIssues,first=incidentAt});state.LogError=log.Error;}
                     else if(incidentAt.HasValue && state.Healthy){log.Write("recovered",new {first=incidentAt,restored=state.Time});incidentAt=null;state.LogError=log.Error;}
-                    Latest=state;var handler=Changed;if(handler!=null)handler(state,alert);
+                    bool automatic=TryClaimAutomaticProtection();
+                    state.AutoEmergencyRunning=automatic;Latest=state;var handler=Changed;if(handler!=null)handler(state,alert);
+                    if(automatic)await ExecuteAutomaticProtection(automaticPolicy.Causes).ConfigureAwait(false);
                 }catch(OperationCanceledException){break;}catch(Exception ex){log.Write("monitor_error",new {error=ex.Message});var state=new HealthState{Time=DateTimeOffset.Now,Issues=new[]{"检测程序异常："+ex.Message},LogError=log.Error};Latest=state;var h=Changed;if(h!=null)h(state,policy.NewIncident(state.Issues));}
                 try{await Task.Delay(500,cancel.Token).ConfigureAwait(false);}catch(OperationCanceledException){break;}
             }
             if(pending!=null)try{await pending.ConfigureAwait(false);}catch{}
         }
         public string Inspect(){return String.Join("\r\n",scope.Live().Select(p=>p.OwnerName+" | PID "+p.Pid+" | "+p.Path));}
+        internal void ObserveAutomaticNetwork(NetworkResult result){automaticPolicy.Observe(result);}
+        internal bool TryClaimAutomaticProtection(){return !IsEmergencyRunning && automaticPolicy.Claim(AutoKillEnabled);}
+        internal string[] AutomaticCauses {get{return automaticPolicy.Causes;}}
+        internal async Task<AutomaticProtectionResult> ExecuteAutomaticProtection(string[] causes)
+        {
+            // Log failure must not prevent an already-authorized emergency.
+            log.Write("automatic_emergency_triggered",new {causes=causes,timeoutStreak=automaticPolicy.ConsecutiveTimeouts,apps=profile.Apps.Select(a=>a.Name).ToArray()});
+            var report=new AutomaticProtectionResult{Causes=causes,Result=await Emergency().ConfigureAwait(false)};
+            if(!log.Write("automatic_emergency_result",new {message=report.Message,success=report.Result.Success,causes=causes,result=report.Result}))report.Result.Errors.Add("自动保护结果日志写入失败："+log.Error);
+            var handler=AutomaticProtectionCompleted;if(handler!=null)handler(report);return report;
+        }
         public async Task<StopResult> Emergency()
         {
             var r=new StopResult{Coverage="结果仅覆盖配置的安装目录、已确认的进程后代和选定的专属服务；不代表网络隔离。"};var clock=Stopwatch.StartNew();
+            if(Interlocked.CompareExchange(ref emergencyRunning,1,0)!=0){r.Errors.Add("紧急关闭已经在执行，请等待当前结果。");return r;}
             await operation.WaitAsync().ConfigureAwait(false);
             try{
                 if(!log.Write("emergency_requested",new {apps=profile.Apps.Select(a=>a.Name).ToArray()}))r.Errors.Add("紧急关闭请求日志写入失败："+log.Error);
@@ -128,7 +171,7 @@ namespace EnvGuard
                 r.Remaining=scope.Live().Count;if(r.Remaining>0)r.Errors.Add("仍有 "+r.Remaining+" 个已识别进程存活。");
                 foreach(var s in profile.Apps.SelectMany(a=>a.Services).GroupBy(s=>s.Name,StringComparer.OrdinalIgnoreCase).Select(g=>g.First()))try{using(var service=new ServiceController(s.Name)){service.Refresh();if(service.Status!=ServiceControllerStatus.Stopped)r.Errors.Add(s.Name+" 仍未停止。");}}catch(Exception ex){r.Errors.Add(ex.Message);}
                 r.Errors=r.Errors.Distinct().ToList();
-            }catch(Exception ex){r.Errors.Add(ex.Message);}finally{r.ElapsedMs=clock.ElapsedMilliseconds;if(!log.Write("emergency_result",r))r.Errors.Add("紧急关闭结果日志写入失败："+log.Error);operation.Release();}
+            }catch(Exception ex){r.Errors.Add(ex.Message);}finally{r.ElapsedMs=clock.ElapsedMilliseconds;if(!log.Write("emergency_result",r))r.Errors.Add("紧急关闭结果日志写入失败："+log.Error);operation.Release();Volatile.Write(ref emergencyRunning,0);}
             return r;
         }
         public void Dispose(){cancel.Cancel();if(worker!=null)try{worker.Wait(6000);}catch{}scope.Dispose();log.Write("monitor_stopped",new {time=DateTimeOffset.Now});cancel.Dispose();}

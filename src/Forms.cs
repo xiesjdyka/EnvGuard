@@ -81,6 +81,8 @@ namespace EnvGuard
         readonly TextBox review=UI.Details();readonly CheckBox confirm=new CheckBox{Text="我已核对出口 IP、环境和软件范围，确认这是正确基准",AutoSize=true};
         readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};readonly Button save,capture,back,next;readonly Label status=UI.Label("先选软件，再核对环境；保存前会让你确认。",36);
         readonly CheckBox more=new CheckBox{Text="更多检查（可选，点这里展开）",AutoSize=true,Margin=new Padding(0,12,0,8)};
+        readonly CheckBox autoKill=new CheckBox{Text="检测到异常时自动执行紧急关闭",AutoSize=true,Margin=new Padding(4,8,0,0),AccessibleName="检测到异常时自动执行紧急关闭"};
+        readonly Label autoMode=UI.Label("",58);
         readonly TableLayoutPanel advanced=new TableLayoutPanel{AutoSize=true,Dock=DockStyle.Top,ColumnCount=1,Visible=false,Margin=Padding.Empty};
         readonly ErrorProvider errors=new ErrorProvider();Control invalid;
         Profile draft;DateTime captured;bool busy;public Profile Result;
@@ -97,6 +99,9 @@ namespace EnvGuard
             software.Controls.Add(apps);software.Controls.Add(UI.Label("Claude 还没打开？点下方“已安装的软件”选择它。也可以选 EXE 或正在运行的软件。\r\n添加后会让你确认关闭范围；Chrome 如需一起关闭，另外添加。",70));software.Controls.Add(appButtons);
             var content=new TableLayoutPanel{Dock=DockStyle.Top,AutoSize=true,ColumnCount=1,Margin=Padding.Empty};content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             var intro=UI.Label("先确认端口，日志保留默认就行。其他项目可以稍后再加。",40);intro.Font=new Font(Font.FontFamily,11,FontStyle.Bold);content.Controls.Add(intro);
+            content.Controls.Add(autoKill);content.Controls.Add(autoMode);
+            autoKill.CheckedChanged+=(s,e)=>{autoMode.Text=autoKill.Checked?"自动紧急关闭模式：出口 IP 不符或连续两轮超时时，直接关闭已选范围。\r\n未保存工作会丢失；其他预警仍需手动处理。":"手动模式（默认）：异常只提醒，是否关闭由你决定。\r\n勾选后才会自动关闭；不会修改系统代理或阻止软件启动。";if(draft!=null)InvalidateDraft();};
+            autoMode.Text="手动模式（默认）：异常只提醒，是否关闭由你决定。\r\n勾选后才会自动关闭；不会修改系统代理或阻止软件启动。";
             content.Controls.Add(Setting("代理端口（数字）",port,"打开你正在用的代理软件，在设置里找 HTTP 端口或 mixed / 混合端口，填它后面的数字。\r\n不管软件叫什么，找的是同一个东西。别填节点列表里的服务器端口。",UI.Button("去哪找？",(s,e)=>MessageBox.Show(this,"1. 打开你正在使用的代理软件，进入设置。\r\n2. 找“端口”或“本地代理”一类的页面。\r\n3. 看 HTTP 端口，或者 mixed / 混合端口，把数字填进来。\r\n\r\n举个例子：v2rayN 左下角如果显示 [mixed:10808]，就填 10808。它只是例子；其他软件以自己的设置为准。\r\n\r\n如果只有 SOCKS 端口，或只开了 TUN / 虚拟网卡，请先查看软件是否提供 HTTP 或混合端口。这两个名字的入口才适用于 EnvGuard；不要把 SOCKS 的数字随便填过来。\r\n\r\n不用填节点地址、账号、密码，也不用找代理软件的配置文件。","我该填哪个数字？",MessageBoxButtons.OK,MessageBoxIcon.Information))));
             content.Controls.Add(Setting("日志存放位置",logFile,"已经填好了，直接用就行。每次提醒、恢复和紧急关闭都会留下记录。\r\n想放在别处，点右边“换文件夹”，选电脑上的文件夹。",UI.Button("换文件夹",(s,e)=>{using(var d=new FolderBrowserDialog{Description="选择本地日志文件夹；里面会追加 events.jsonl"}){try{d.SelectedPath=Path.GetDirectoryName(logFile.Text);}catch{}if(d.ShowDialog(this)==DialogResult.OK)logFile.Text=Path.Combine(d.SelectedPath,"events.jsonl");}})));
             var guide=new LinkLabel{Text="Chrome 登录前怎么准备？查看操作方法",AutoSize=true,Margin=new Padding(148,0,0,4)};guide.LinkClicked+=(s,e)=>{try{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"Chrome浏览器怎么准备.html");Process.Start(new ProcessStartInfo(File.Exists(path)?path:"https://github.com/xiesjdyka/EnvGuard/blob/main/CHROME-PRIVACY.md"){UseShellExecute=true});}catch(Exception ex){UI.Error("说明打开失败："+ex.Message);}};content.Controls.Add(guide);
@@ -115,7 +120,7 @@ namespace EnvGuard
             foreach(var button in new[]{next,save}){button.BackColor=UI.Blue;button.ForeColor=Color.White;button.FlatAppearance.BorderSize=0;}
             logFile.Text=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"EnvGuard","logs","events.jsonl");
             repository.Text=Program.DefaultRepository;
-            if(previous!=null){foreach(var a in previous.Apps)apps.Items.Add(a);port.Text=previous.ProxyPort.ToString();expected.Text=previous.ExitIp;logFile.Text=previous.LogFile;browser.Text=previous.BrowserPreferences;v2ray.Text=previous.V2rayConfig;repository.Text=previous.GitHubRepository;more.Checked=!String.IsNullOrEmpty(previous.BrowserPreferences)||!String.IsNullOrEmpty(previous.V2rayConfig);}
+            if(previous!=null){foreach(var a in previous.Apps)apps.Items.Add(a);port.Text=previous.ProxyPort.ToString();expected.Text=previous.ExitIp;logFile.Text=previous.LogFile;browser.Text=previous.BrowserPreferences;v2ray.Text=previous.V2rayConfig;repository.Text=previous.GitHubRepository;autoKill.Checked=previous.AutoKillOnAnomaly;more.Checked=!String.IsNullOrEmpty(previous.BrowserPreferences)||!String.IsNullOrEmpty(previous.V2rayConfig);}
             foreach(var box in new[]{port,expected,logFile,browser,v2ray,repository})box.TextChanged+=(s,e)=>InvalidateDraft();confirm.CheckedChanged+=(s,e)=>save.Enabled=confirm.Checked && draft!=null && !busy;
             FormClosing+=(s,e)=>{if(busy){e.Cancel=true;status.Text="正在检测，请等当前操作完成再关闭。";}};
         }
@@ -167,7 +172,7 @@ namespace EnvGuard
             errors.Clear();invalid=null;int n;if(!Int32.TryParse(port.Text,out n) || n<1 || n>65535){invalid=port;tabs.SelectedIndex=1;errors.SetError(port,"填代理软件的 HTTP 或混合端口数字（1—65535）。");throw new InvalidOperationException("还没有填正确的代理端口。点输入框旁的“去哪找？”看步骤。");}if(apps.Items.Count==0){tabs.SelectedIndex=0;throw new InvalidOperationException("先选择需要保护的软件。");}
             IPAddress ip;if(!String.IsNullOrWhiteSpace(expected.Text)&&!IPAddress.TryParse(expected.Text.Trim(),out ip)){more.Checked=true;tabs.SelectedIndex=1;invalid=expected;errors.SetError(expected,"这里填 IP 地址，不填网址；不确定可以留空。");throw new InvalidOperationException("指定出口 IP 格式不正确；不知道目标 IP 可以留空。");}
             string file=Path.GetFullPath(logFile.Text);if(!file.EndsWith(".jsonl",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("日志文件需要 .jsonl 扩展名。");
-            return new Profile{ProxyPort=n,ExitIp=expected.Text.Trim(),LogFile=file,Apps=apps.Items.Cast<AppTarget>().ToList(),BrowserPreferences=browser.Text.Trim(),V2rayConfig=v2ray.Text.Trim(),GitHubRepository=repository.Text.Trim()};
+            return new Profile{ProxyPort=n,ExitIp=expected.Text.Trim(),LogFile=file,Apps=apps.Items.Cast<AppTarget>().ToList(),BrowserPreferences=browser.Text.Trim(),V2rayConfig=v2ray.Text.Trim(),GitHubRepository=repository.Text.Trim(),AutoKillOnAnomaly=autoKill.Checked};
         }
         void Busy(bool value){busy=value;capture.Enabled=!value;next.Enabled=!value;tabs.Enabled=!value;save.Enabled=!value && confirm.Checked && draft!=null;Navigation();if(!value&&invalid!=null){invalid.Focus();}}
         async Task CaptureBaseline()
@@ -181,13 +186,13 @@ namespace EnvGuard
             if(draft==null || !confirm.Checked)return;Busy(true);status.Text="保存前再次确认环境…";try{
                 if(DateTime.UtcNow-captured>TimeSpan.FromMinutes(5))throw new InvalidOperationException("快照超过 5 分钟，请重新检测确认。");
                 var p=draft;await Task.Run(async()=>{var checker=new EnvironmentChecker(p);var errors=checker.Local();var network=await checker.NetworkForSetup(CancellationToken.None);if(errors.Count>0 || !network.Healthy)throw new InvalidOperationException("保存前环境发生改变或尚未确认，请重新检测。\r\n"+String.Join("\r\n",errors.Concat(network.Confirmed).Concat(network.Unconfirmed)));
-                    var log=new AuditLog(p.LogFile);if(!log.Write("baseline_confirmed",new {baseline=p.CapturedAt,apps=p.Apps.Select(a=>a.Name).ToArray(),snapshot=p.Settings,exit=p.ExitIp}))throw new IOException("无法写入选定日志："+log.Error);p.Save(profileFile);
+                    var log=new AuditLog(p.LogFile);if(!log.Write("baseline_confirmed",new {baseline=p.CapturedAt,apps=p.Apps.Select(a=>a.Name).ToArray(),snapshot=p.Settings,exit=p.ExitIp,autoKillOnAnomaly=p.AutoKillOnAnomaly}))throw new IOException("无法写入选定日志："+log.Error);p.Save(profileFile);
                 });Result=p;Busy(false);DialogResult=DialogResult.OK;Close();
             }catch(Exception ex){status.Text="未保存："+ex.Message;UI.Error(ex.Message);}finally{if(!IsDisposed)Busy(false);}
         }
         public static string Describe(Profile p)
         {
-            var lines=new List<string>{"确认时间："+p.CapturedAt,"预期出口 IP："+p.ExitIp,"本机代理："+p.ProxyHost+":"+p.ProxyPort,"代理程序："+p.ProxyExecutable,"日志文件："+p.LogFile,"", "保护范围（紧急关闭会丢失未保存工作）："};
+            var lines=new List<string>{"确认时间："+p.CapturedAt,"预期出口 IP："+p.ExitIp,"本机代理："+p.ProxyHost+":"+p.ProxyPort,"代理程序："+p.ProxyExecutable,"日志文件："+p.LogFile,"模式："+(p.AutoKillOnAnomaly?"自动紧急关闭（出口不符或连续两轮超时；未保存工作会丢失）":"手动预警与紧急关闭"),"", "保护范围（紧急关闭会丢失未保存工作）："};
             foreach(var a in p.Apps){lines.Add(a.Name+"："+a.Executable);lines.Add("  更新绑定："+(a.Package==null?"固定 EXE；更新后需确认":"自动接续同发布者签名应用包 / "+a.Package.Family));lines.Add("  专属目录："+(a.Folder??"未启用；仅主进程与观察到的后代"));foreach(var s in a.Services)lines.Add("  专属服务："+s.Name+" / "+s.Executable);}
             lines.Add("");foreach(var pair in p.Settings)lines.Add(pair.Key+"："+pair.Value);lines.Add("");lines.Add("正常时间流逝、自动夏令时切换不算异常。未选择的浏览器配置、字体和全流量路径不在检测范围。");return String.Join("\r\n",lines);
         }
@@ -195,45 +200,72 @@ namespace EnvGuard
         public void PreviewAdvanced(bool value){more.Checked=value;}
         public void PreviewAdvancedBottom(){((TabPage)tabs.TabPages[1]).AutoScrollPosition=new Point(0,10000);}
         public bool AdvancedShown {get{return more.Checked;}}
+        internal bool AutomaticChecked {get{return autoKill.Checked;}}
+        internal void PreviewAutomatic(bool enabled){autoKill.Checked=enabled;}
         public bool FieldsAligned {get{return port.Left==logFile.Left&&port.Width==logFile.Width&&browser.Width==v2ray.Width&&port.Height==logFile.Height&&(!more.Checked||(port.Width==expected.Width&&expected.Width==browser.Width&&port.PointToScreen(Point.Empty).X==browser.PointToScreen(Point.Empty).X));}}
         protected override void Dispose(bool disposing){if(disposing)errors.Dispose();base.Dispose(disposing);}
     }
     public sealed class AlertForm : Form
     {
         readonly Label heading=UI.Label("环境异常，请先暂停使用保护软件",65);readonly TextBox details=UI.Details();readonly Func<Task> stop;
-        readonly string original;readonly DateTimeOffset first;
-        public AlertForm(HealthState initial,Func<Task> emergency)
+        readonly string original;readonly DateTimeOffset first;readonly Label note;
+        AutomaticProtectionResult automaticResult;
+        public AlertForm(HealthState initial,Func<Task> emergency,bool automaticMode=false)
         {
             stop=emergency;first=initial.Time;original=String.Join("\r\n",initial.Issues.Concat(initial.LogError==null?new string[0]:new[]{"日志无法保存："+initial.LogError}));
             UI.Base(this,"EnvGuard · 环境预警",760,430);Padding=new Padding(24);heading.Font=new Font(Font.FontFamily,17,FontStyle.Bold);heading.ForeColor=UI.Red;
-            var note=UI.Label("预警不会自动断网或关闭软件。红色按钮将立即执行强制关闭，未保存工作会丢失。",58);
+            note=UI.Label("",58);UpdateMode(automaticMode);
             var buttons=UI.Buttons();var kill=UI.Button("紧急关闭保护软件",async(s,e)=>{await stop();});kill.BackColor=UI.Red;kill.ForeColor=Color.White;kill.FlatStyle=FlatStyle.Flat;buttons.Controls.Add(kill);buttons.Controls.Add(UI.Button("知道了",(s,e)=>Close()));Controls.Add(details);Controls.Add(note);Controls.Add(heading);Controls.Add(buttons);UpdateState(initial);
         }
-        public void UpdateState(HealthState state){if(IsDisposed)return;bool restored=state.Healthy;heading.Text=restored?"检查项已恢复（保留原始原因）":"环境异常，请先暂停使用保护软件";heading.ForeColor=restored?UI.Green:UI.Red;details.Text="首次异常："+first.ToString("G")+"\r\n"+original+"\r\n\r\n最新检查："+state.Time.ToString("G")+"\r\n"+state.Summary+"\r\n"+String.Join("\r\n",state.Issues)+"\r\n\r\n原始异常与恢复记录已尝试写入日志；日志失败会明确提示。";}
+        public void UpdateMode(bool enabled){note.Text=enabled?"自动模式：出口不符或连续两轮超时会直接紧急关闭；未保存工作会丢失。\r\n其他预警仍可点红色按钮手动关闭，不会自动断网。":"手动模式：只预警，不会自动关闭。红色按钮立即强制关闭，未保存工作会丢失。";}
+        public void UpdateAutomaticResult(AutomaticProtectionResult result,HealthState state){automaticResult=result;UpdateState(state);}
+        public void UpdateState(HealthState state)
+        {
+            if(IsDisposed)return;bool restored=state.Healthy;
+            heading.Text=state.AutoEmergencyRunning?"正在自动执行紧急保护…":automaticResult!=null?automaticResult.Message:restored?"检查项已恢复（保留原始原因）":"环境异常，请先暂停使用保护软件";
+            heading.ForeColor=state.AutoEmergencyRunning?UI.Red:automaticResult!=null?(automaticResult.Result.Success?UI.Green:UI.Red):(restored?UI.Green:UI.Red);
+            string result=automaticResult==null?"":automaticResult.Message+"\r\n耗时："+automaticResult.Result.ElapsedMs+" ms；已识别残留："+automaticResult.Result.Remaining+"\r\n"+String.Join("\r\n",automaticResult.Result.Errors)+"\r\n\r\n";
+            details.Text=result+"首次异常："+first.ToString("G")+"\r\n"+original+"\r\n\r\n最新检查："+state.Time.ToString("G")+"\r\n"+state.Summary+"\r\n"+String.Join("\r\n",state.Issues)+"\r\n\r\n原始异常与恢复记录已尝试写入日志；日志失败会明确提示。";
+        }
     }
     public sealed class MainForm : Form
     {
         readonly Profile profile;readonly string file;readonly MonitorEngine engine;
         readonly Label status=UI.Label("正在检测，请等待",60),summary=UI.Label("",90);readonly TextBox details=UI.Details();readonly NotifyIcon tray;
         readonly Button kill;AlertForm alert;bool stopping,reconfigure;public bool Reconfigure {get{return reconfigure;}}
+        readonly CheckBox autoKill=new CheckBox{Text="检测到异常时自动执行紧急关闭",Dock=DockStyle.Top,Height=40,AccessibleName="检测到异常时自动执行紧急关闭"};
+        bool modeUpdating;readonly bool isPreview;AutomaticProtectionResult automaticResult;
         public MainForm(Profile p,string profileFile,bool preview)
         {
-            profile=p;file=profileFile;UI.Base(this,"EnvGuard · 环境预警与紧急关闭",880,610);Padding=new Padding(24);status.Font=new Font(Font.FontFamily,20,FontStyle.Bold);
-            summary.Text="保护软件："+String.Join("、",p.Apps.Select(a=>a.Name))+"\r\n预期出口："+p.ExitIp+"   |   时区："+(p.Settings.ContainsKey("Windows 时区")?p.Settings["Windows 时区"]:"未确认")+"\r\n模式：只预警 + 手动紧急关闭；不会自动启动或自动关闭软件。";
+            profile=p;file=profileFile;isPreview=preview;UI.Base(this,"EnvGuard · 环境预警与紧急关闭",880,670);Padding=new Padding(24);status.Font=new Font(Font.FontFamily,20,FontStyle.Bold);
+            autoKill.Checked=p.AutoKillOnAnomaly;
             var footer=UI.Label("日志："+p.LogFile+"\r\n与基准一致不等于保证所有流量受保护，也不保证账号不会被限制。",72);footer.Dock=DockStyle.Bottom;
             var buttons=UI.Buttons();kill=UI.Button("紧急关闭保护软件",async(s,e)=>await Emergency());kill.FlatStyle=FlatStyle.Flat;kill.BackColor=UI.Red;kill.ForeColor=Color.White;buttons.Controls.Add(kill);
             buttons.Controls.Add(UI.Button("查看进程范围",(s,e)=>{if(engine!=null)ShowText("已识别进程（不含未知客体）",engine.Inspect());}));
             buttons.Controls.Add(UI.Button("重新配置",(s,e)=>{if(MessageBox.Show("重新配置期间会暂停预警。请先暂停使用保护软件，再继续。","EnvGuard",MessageBoxButtons.OKCancel,MessageBoxIcon.Warning)==DialogResult.OK){reconfigure=true;Close();}}));
             buttons.Controls.Add(UI.Button("查看日志",(s,e)=>{try{if(File.Exists(profile.LogFile))Process.Start("explorer.exe","/select,\""+profile.LogFile+"\"");else UI.Error("日志还不存在。");}catch(Exception ex){UI.Error(ex.Message);}}));
-            buttons.Controls.Add(UI.Button("检查更新",async(s,e)=>await CheckUpdate()));Controls.Add(details);Controls.Add(summary);Controls.Add(status);Controls.Add(footer);Controls.Add(buttons);
+            buttons.Controls.Add(UI.Button("检查更新",async(s,e)=>await CheckUpdate()));Controls.Add(details);Controls.Add(autoKill);Controls.Add(summary);Controls.Add(status);Controls.Add(footer);Controls.Add(buttons);
             var menu=new ContextMenuStrip();menu.Items.Add("显示窗口",null,(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();});menu.Items.Add("紧急关闭保护软件",null,async(s,e)=>await Emergency());menu.Items.Add("退出预警（不关闭软件）",null,(s,e)=>Close());
             tray=new NotifyIcon{Icon=SystemIcons.Shield,Text="EnvGuard · 只预警，手动关闭",Visible=!preview,ContextMenuStrip=menu};tray.DoubleClick+=(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();};Resize+=(s,e)=>{if(WindowState==FormWindowState.Minimized && !preview)Hide();};
-            if(!preview){engine=new MonitorEngine(p,profileFile);engine.Changed+=(state,show)=>{if(IsDisposed || !IsHandleCreated)return;try{BeginInvoke((Action)(()=>Render(state,show)));}catch{}};Shown+=(s,e)=>engine.Start();}
-            FormClosing+=(s,e)=>{if(stopping){e.Cancel=true;return;}if(!preview && !reconfigure && MessageBox.Show("退出后不再监测，也不会关闭保护软件。确定退出？","EnvGuard",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)e.Cancel=true;};
+            if(!preview){engine=new MonitorEngine(p,profileFile);engine.Changed+=(state,show)=>{if(IsDisposed || !IsHandleCreated)return;try{BeginInvoke((Action)(()=>Render(state,show)));}catch{}};engine.AutomaticProtectionCompleted+=result=>{if(IsDisposed || !IsHandleCreated)return;try{BeginInvoke((Action)(()=>ShowAutomaticResult(result)));}catch{}};Shown+=(s,e)=>engine.Start();}
+            autoKill.CheckedChanged+=async(s,e)=>await ChangeAutomaticMode();UpdateMode();
+            FormClosing+=(s,e)=>{if(stopping || modeUpdating || (engine!=null&&engine.IsEmergencyRunning)){e.Cancel=true;return;}if(!preview && !reconfigure && MessageBox.Show("退出后不再监测，也不会关闭保护软件。确定退出？","EnvGuard",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes)e.Cancel=true;};
             FormClosed+=(s,e)=>{if(alert!=null)alert.Close();tray.Dispose();if(engine!=null)engine.Dispose();};
         }
-        public void Render(HealthState state,bool show){status.Text=state.Summary;status.ForeColor=state.Healthy?UI.Green:state.Issues.Length>0 || state.LogError!=null?UI.Red:UI.Blue;details.Text="检查时间："+state.Time.ToString("G")+"\r\n已识别存活进程："+state.ProcessCount+"\r\n"+String.Join("\r\n",state.Issues)+ (state.LogError!=null?"\r\n日志失败："+state.LogError:"")+"\r\n\r\n"+(state.Healthy?"本轮所选检查项通过。":"检测未通过或尚未确认；不要把检测结果当作全流量隔离证明。");
-            if(alert!=null && !alert.IsDisposed)alert.UpdateState(state);if(show){tray.ShowBalloonTip(5000,"EnvGuard 环境异常",state.Summary+"；请查看原因。需要停止时点击紧急关闭。",ToolTipIcon.Warning);if(alert==null || alert.IsDisposed){alert=new AlertForm(state,Emergency);alert.Show(this);}alert.Activate();}}
+        void UpdateMode(){summary.Text="保护软件："+String.Join("、",profile.Apps.Select(a=>a.Name))+"\r\n预期出口："+profile.ExitIp+"   |   时区："+(profile.Settings.ContainsKey("Windows 时区")?profile.Settings["Windows 时区"]:"未确认")+"\r\n模式："+(profile.AutoKillOnAnomaly?"自动紧急关闭（出口不符 / 连续两轮超时）":"手动模式：仅预警，由你点击紧急关闭");tray.Text=profile.AutoKillOnAnomaly?"EnvGuard · 自动紧急关闭":"EnvGuard · 手动预警与关闭";if(alert!=null&&!alert.IsDisposed)alert.UpdateMode(profile.AutoKillOnAnomaly);}
+        async Task ChangeAutomaticMode(){if(modeUpdating)return;modeUpdating=true;autoKill.Enabled=false;try{
+            bool enabled=autoKill.Checked;
+            if(!isPreview && enabled && MessageBox.Show(this,"开启后，出口 IP 不符或连续两轮超时会立即强制关闭保护软件，未保存工作会丢失。\r\n如果当前已满足触发条件，开启后就会执行。确定开启？","开启自动紧急关闭",MessageBoxButtons.YesNo,MessageBoxIcon.Warning)!=DialogResult.Yes){autoKill.Checked=profile.AutoKillOnAnomaly;return;}
+            if(engine!=null)await engine.SetAutomaticMode(enabled);else profile.AutoKillOnAnomaly=enabled;
+        }catch(Exception ex){autoKill.Checked=profile.AutoKillOnAnomaly;UI.Error(ex.Message);}finally{UpdateMode();modeUpdating=false;autoKill.Enabled=true;}}
+        internal bool AutomaticChecked {get{return autoKill.Checked;}}
+        internal string ModeText {get{return summary.Text;}}
+        internal void PreviewAutomatic(bool enabled){if(!isPreview)throw new InvalidOperationException();autoKill.Checked=enabled;}
+        void ShowAutomaticResult(AutomaticProtectionResult result){automaticResult=result;kill.Enabled=true;var state=engine.Latest;state.AutoEmergencyRunning=false;Render(state,false);if(alert==null || alert.IsDisposed){alert=new AlertForm(state,Emergency,profile.AutoKillOnAnomaly);alert.Show(this);}alert.UpdateAutomaticResult(result,state);alert.Activate();tray.ShowBalloonTip(5000,"EnvGuard 紧急保护",result.Message,result.Result.Success?ToolTipIcon.Info:ToolTipIcon.Warning);}
+        public void Render(HealthState state,bool show){status.Text=state.Summary;status.ForeColor=state.Healthy?UI.Green:state.Issues.Length>0 || state.LogError!=null?UI.Red:UI.Blue;details.Text="检查时间："+state.Time.ToString("G")+"\r\n已识别存活进程："+state.ProcessCount+"\r\n网络：每 "+(NetworkTiming.PollIntervalMs/1000)+" 秒一轮 / 单次请求 "+(NetworkTiming.RequestTimeoutMs/1000)+" 秒；连续未确认 "+state.NetworkFailures+" 轮。"+(state.NetworkPending?"\r\n本次仅记录并复核；连续两轮未确认才弹窗，出口变化立即弹窗。":"")+"\r\n"+String.Join("\r\n",state.Issues)+ (state.LogError!=null?"\r\n日志失败："+state.LogError:"")+"\r\n\r\n"+(state.Healthy?"本轮所选检查项通过。":"检测未通过或尚未确认；不要把检测结果当作全流量隔离证明。");
+            if(state.AutoEmergencyRunning){status.Text="正在自动执行紧急保护…";kill.Enabled=false;}else if(!stopping)kill.Enabled=true;
+            if(automaticResult!=null)details.AppendText("\r\n\r\n最近自动保护："+automaticResult.Message+"\r\n"+String.Join("\r\n",automaticResult.Result.Errors));
+            if(alert!=null && !alert.IsDisposed)alert.UpdateState(state);if(show){tray.ShowBalloonTip(5000,"EnvGuard 环境异常",state.AutoEmergencyRunning?"正在自动执行紧急保护…":state.Summary+"；请查看原因。",ToolTipIcon.Warning);if(alert==null || alert.IsDisposed){alert=new AlertForm(state,Emergency,profile.AutoKillOnAnomaly);alert.Show(this);}alert.Activate();}}
         async Task Emergency(){if(stopping || engine==null)return;stopping=true;kill.Enabled=false;status.Text="正在强制关闭并核对残留…";try{var result=await Task.Run(()=>engine.Emergency());ShowText(result.Success?"配置范围内未发现残留":"结束未完全确认，请查看原因","耗时："+result.ElapsedMs+" ms\r\n停止尝试："+result.StopAttempts+"\r\n已识别残留："+result.Remaining+"\r\n"+String.Join("\r\n",result.Errors)+"\r\n\r\n"+result.Coverage);}catch(Exception ex){UI.Error(ex.Message);}finally{stopping=false;kill.Enabled=true;}}
         async Task CheckUpdate(){try{if(String.IsNullOrEmpty(profile.GitHubRepository)){UI.Error("尚未设置 GitHub 仓库。发布后在重新配置中填入账号/仓库。");return;}status.Text="正在通过指定代理查询正式发布…";
             using(var client=EnvironmentChecker.Client(profile)){client.Timeout=TimeSpan.FromSeconds(15);string url="https://api.github.com/repos/"+profile.GitHubRepository+"/releases/latest";using(var response=await client.GetAsync(url)){
